@@ -1,0 +1,121 @@
+use crate::{db, market, models::*, telegram};
+use axum::{extract::{Path, State}, http::{HeaderMap, StatusCode}, routing::{get, post, delete}, Json, Router};
+use chrono::Utc;
+use redis::AsyncCommands;
+use sqlx::PgPool;
+use std::{env};
+use tower_http::{cors::CorsLayer, trace::TraceLayer};
+use uuid::Uuid;
+
+#[derive(Clone)]
+pub struct AppState { pub db: PgPool, pub redis: redis::Client }
+
+impl AppState {
+    pub async fn new() -> anyhow::Result<Self> {
+        Ok(Self {
+            db: db::connect().await?,
+            redis: redis::Client::open(env::var("REDIS_URL")?)?
+        })
+    }
+}
+
+fn user_id(headers: &HeaderMap) -> Result<i64, StatusCode> {
+    headers.get("x-telegram-user-id")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse().ok())
+        .ok_or(StatusCode::UNAUTHORIZED)
+}
+
+pub fn router(state: AppState) -> Router {
+    Router::new()
+        .route("/health", get(health))
+        .route("/api/monitors", get(list_monitors).post(create_monitor))
+        .route("/api/monitors/{id}", delete(delete_monitor))
+        .route("/api/listings", get(list_listings))
+        .route("/api/collector/monitors", get(collector_monitors))
+        .route("/api/ingest/listing", post(ingest_listing))
+        .with_state(state)
+        .layer(CorsLayer::permissive())
+        .layer(TraceLayer::new_for_http())
+}
+
+async fn health() -> &'static str { "ok" }
+
+async fn list_monitors(State(s): State<AppState>, headers: HeaderMap) -> Result<Json<Vec<Monitor>>, StatusCode> {
+    let uid = user_id(&headers)?;
+    let user = db::create_user(&s.db, uid).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let rows = sqlx::query_as::<_, MonitorRow>("SELECT id,user_id,url,name,enabled,interval_ms,notify_new,notify_price_drop,notify_below_market,min_drop_byn,min_drop_percent,created_at FROM monitors WHERE user_id=$1 ORDER BY created_at DESC").bind(user).fetch_all(&s.db).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(rows.into_iter().map(Into::into).collect()))
+}
+
+async fn create_monitor(State(s): State<AppState>, headers: HeaderMap, Json(input): Json<CreateMonitor>) -> Result<Json<Monitor>, StatusCode> {
+    let uid = user_id(&headers)?;
+    let user = db::create_user(&s.db, uid).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let id = Uuid::new_v4();
+    let row = sqlx::query_as::<_, MonitorRow>("INSERT INTO monitors (id,user_id,url,name,enabled,interval_ms,notify_new,notify_price_drop,notify_below_market,min_drop_byn,min_drop_percent) VALUES ($1,$2,$3,$4,true,$5,$6,$7,$8,$9,$10) RETURNING id,user_id,url,name,enabled,interval_ms,notify_new,notify_price_drop,notify_below_market,min_drop_byn,min_drop_percent,created_at")
+        .bind(id).bind(user).bind(input.url).bind(input.name).bind(input.interval_ms.unwrap_or(1500).clamp(1000,60000))
+        .bind(input.notify_new.unwrap_or(true)).bind(input.notify_price_drop.unwrap_or(true)).bind(input.notify_below_market.unwrap_or(true))
+        .bind(input.min_drop_byn.unwrap_or(50.0)).bind(input.min_drop_percent.unwrap_or(3.0))
+        .fetch_one(&s.db).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(row.into()))
+}
+
+async fn delete_monitor(State(s): State<AppState>, headers: HeaderMap, Path(id): Path<Uuid>) -> Result<StatusCode, StatusCode> {
+    let uid = user_id(&headers)?;
+    let user = db::create_user(&s.db, uid).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    sqlx::query("DELETE FROM monitors WHERE id=$1 AND user_id=$2").bind(id).bind(user).execute(&s.db).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn list_listings(State(s): State<AppState>, headers: HeaderMap) -> Result<Json<Vec<Listing>>, StatusCode> {
+    let uid = user_id(&headers)?;
+    let user = db::create_user(&s.db, uid).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let rows = sqlx::query_as::<_, ListingRow>("SELECT DISTINCT l.id,l.kufar_id,l.url,l.title,l.description,l.price,l.currency,l.location,l.images,l.published_at,l.first_seen_at,l.last_seen_at,l.market_price,l.market_confidence,l.status FROM listings l JOIN monitor_listings ml ON ml.listing_id=l.id JOIN monitors m ON m.id=ml.monitor_id WHERE m.user_id=$1 ORDER BY l.first_seen_at DESC LIMIT 200").bind(user).fetch_all(&s.db).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(rows.into_iter().map(Into::into).collect()))
+}
+
+async fn collector_monitors(State(s): State<AppState>) -> Result<Json<Vec<Monitor>>, StatusCode> {
+    let rows = sqlx::query_as::<_, MonitorRow>("SELECT id,user_id,url,name,enabled,interval_ms,notify_new,notify_price_drop,notify_below_market,min_drop_byn,min_drop_percent,created_at FROM monitors WHERE enabled=true ORDER BY created_at").fetch_all(&s.db).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(rows.into_iter().map(Into::into).collect()))
+}
+
+async fn ingest_listing(State(s): State<AppState>, Json(input): Json<IngestListing>) -> Result<Json<Listing>, StatusCode> {
+    let mut redis = s.redis.get_multiplexed_async_connection().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let key = format!("velora:seen:{}", input.kufar_id);
+    let first: bool = redis.set_nx(&key, "1").await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let _: () = redis.expire(&key, 86400).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let previous = sqlx::query_scalar::<_, f64>("SELECT price FROM listings WHERE kufar_id=$1").bind(&input.kufar_id).fetch_optional(&s.db).await.ok().flatten();
+    let id = Uuid::new_v4();
+    let now = Utc::now();
+    let row = sqlx::query_as::<_, ListingRow>("INSERT INTO listings (id,kufar_id,url,title,description,price,currency,location,images,published_at,first_seen_at,last_seen_at,status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11,'active') ON CONFLICT(kufar_id) DO UPDATE SET title=EXCLUDED.title,description=COALESCE(EXCLUDED.description,listings.description),price=EXCLUDED.price,location=COALESCE(EXCLUDED.location,listings.location),images=CASE WHEN cardinality(EXCLUDED.images)>0 THEN EXCLUDED.images ELSE listings.images END,last_seen_at=now(),updated_at=now() RETURNING id,kufar_id,url,title,description,price,currency,location,images,published_at,first_seen_at,last_seen_at,market_price,market_confidence,status")
+        .bind(id).bind(&input.kufar_id).bind(&input.url).bind(&input.title).bind(&input.description).bind(input.price).bind(input.currency.unwrap_or("BYN".into())).bind(&input.location).bind(input.images.unwrap_or_default()).bind(input.published_at).bind(now)
+        .fetch_one(&s.db).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    sqlx::query("INSERT INTO monitor_listings(monitor_id,listing_id) VALUES($1,$2) ON CONFLICT DO NOTHING").bind(input.monitor_id).bind(row.id).execute(&s.db).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if let Some(p) = input.price {
+        sqlx::query("INSERT INTO price_history(listing_id,price) VALUES($1,$2)").bind(row.id).bind(p).execute(&s.db).await.ok();
+    }
+    let (market_price, confidence) = market::estimate(&s.db, &row.title).await;
+    sqlx::query("UPDATE listings SET market_price=$2,market_confidence=$3 WHERE id=$1").bind(row.id).bind(market_price).bind(confidence).execute(&s.db).await.ok();
+    let mut out: Listing = row.into();
+    out.market_price = market_price; out.market_confidence = confidence;
+
+    let monitor = sqlx::query_as::<_, MonitorRow>("SELECT id,user_id,url,name,enabled,interval_ms,notify_new,notify_price_drop,notify_below_market,min_drop_byn,min_drop_percent,created_at FROM monitors WHERE id=$1").bind(input.monitor_id).fetch_optional(&s.db).await.ok().flatten();
+    if let Some(m) = monitor {
+        let chat_id = sqlx::query_scalar::<_, i64>("SELECT telegram_id FROM users WHERE id=$1").bind(m.user_id).fetch_optional(&s.db).await.ok().flatten();
+        if let Some(chat) = chat_id {
+            let kind = if !first && previous.is_some() && input.price.unwrap_or(0.0) < previous.unwrap_or(0.0) && m.notify_price_drop { "price_drop" } else if first && m.notify_new { "new" } else { "" };
+            if !kind.is_empty() {
+                let _ = telegram::notify(chat, &out, kind, previous).await;
+            }
+        }
+    }
+    Ok(Json(out))
+}
+
+#[derive(sqlx::FromRow)]
+struct MonitorRow { id:Uuid,user_id:Uuid,url:String,name:Option<String>,enabled:bool,interval_ms:i64,notify_new:bool,notify_price_drop:bool,notify_below_market:bool,min_drop_byn:f64,min_drop_percent:f64,created_at:chrono::DateTime<Utc> }
+impl From<MonitorRow> for Monitor { fn from(x:MonitorRow)->Self { Self{id:x.id,user_id:x.user_id,url:x.url,name:x.name,enabled:x.enabled,interval_ms:x.interval_ms,notify_new:x.notify_new,notify_price_drop:x.notify_price_drop,notify_below_market:x.notify_below_market,min_drop_byn:x.min_drop_byn,min_drop_percent:x.min_drop_percent,created_at:x.created_at} } }
+
+#[derive(sqlx::FromRow)]
+struct ListingRow { id:Uuid,kufar_id:String,url:String,title:String,description:Option<String>,price:Option<f64>,currency:String,location:Option<String>,images:Vec<String>,published_at:Option<chrono::DateTime<Utc>>,first_seen_at:chrono::DateTime<Utc>,last_seen_at:chrono::DateTime<Utc>,market_price:Option<f64>,market_confidence:Option<f64>,status:String }
+impl From<ListingRow> for Listing { fn from(x:ListingRow)->Self { Self{id:x.id,kufar_id:x.kufar_id,url:x.url,title:x.title,description:x.description,price:x.price,currency:x.currency,location:x.location,images:x.images,published_at:x.published_at,first_seen_at:x.first_seen_at,last_seen_at:x.last_seen_at,market_price:x.market_price,market_confidence:x.market_confidence,status:x.status} } }
