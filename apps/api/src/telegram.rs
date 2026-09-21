@@ -10,7 +10,8 @@ pub async fn run(_state: AppState) -> Result<()> {
         if let Some(text) = msg.text() {
             if text.starts_with("/start") {
                 let url = std::env::var("MINIAPP_URL").unwrap_or_default();
-                let keyboard = InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::url("⚡ Открыть VELORA", url.parse()?)]]);
+                let button_url = Url::parse(&url).unwrap_or_else(|_| Url::parse("https://t.me").expect("static Telegram URL is valid"));
+                let keyboard = InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::url("⚡ Открыть VELORA", button_url)]]);
 
                 bot.send_message(msg.chat.id, "VELORA\n\nМониторинг работает через Mini App.")
                     .reply_markup(keyboard)
