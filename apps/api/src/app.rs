@@ -41,7 +41,7 @@ fn user_id(headers: &HeaderMap) -> Result<i64, StatusCode> {
     let secret = key.finalize().into_bytes();
     let mut mac = H::new_from_slice(&secret).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     mac.update(check.as_bytes());
-    let expected = hex::encode(mac.finalize().into_bytes());
+    let expected = mac.finalize().into_bytes().iter().map(|b| format!("{:02x}", b)).collect::<String>();
     if expected.as_bytes().ct_eq(hash.as_bytes()).unwrap_u8()!=1 { return Err(StatusCode::UNAUTHORIZED); }
     let raw = parts.iter().find(|(k,_)| *k=="user").map(|(_,v)| *v).ok_or(StatusCode::UNAUTHORIZED)?;
     let decoded = urlencoding::decode(raw).map_err(|_| StatusCode::UNAUTHORIZED)?;
