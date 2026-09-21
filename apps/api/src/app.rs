@@ -172,14 +172,14 @@ async fn ingest_listing(State(s): State<AppState>, headers: HeaderMap, Json(inpu
                     .bind(m.user_id).bind(m.id).bind(out.id).bind(kind).fetch_optional(&s.db).await.ok().flatten().is_some();
                 if inserted {
                     let send_started = Utc::now();
-                    if telegram::notify(chat, &out, kind, previous).await.is_ok() {
+                    if let Ok(message) = telegram::notify(chat, &out, kind, previous).await {
                         let sent_at = Utc::now();
                         let detected_at = sqlx::query_scalar::<_, chrono::DateTime<Utc>>("SELECT COALESCE(first_detected_at, first_seen_at) FROM listings WHERE id=$1").bind(out.id).fetch_one(&s.db).await.unwrap_or(out.first_seen_at);
                         let detection_ms = detected_at.signed_duration_since(out.published_at.unwrap_or(detected_at)).num_milliseconds().max(0);
                         let delivery_ms = sent_at.signed_duration_since(send_started).num_milliseconds().max(0);
                         let total_ms = sent_at.signed_duration_since(out.published_at.unwrap_or(out.first_seen_at)).num_milliseconds().max(0);
-                        sqlx::query("UPDATE notifications SET sent_at=$2,detection_latency_ms=$3,delivery_latency_ms=$4,total_latency_ms=$5 WHERE user_id=$1 AND listing_id=$6 AND kind=$7")
-                            .bind(m.user_id).bind(sent_at).bind(detection_ms).bind(delivery_ms).bind(total_ms).bind(out.id).bind(kind).execute(&s.db).await.ok();
+                        sqlx::query("UPDATE notifications SET sent_at=$2,telegram_message_id=$3,detection_latency_ms=$4,delivery_latency_ms=$5,total_latency_ms=$6 WHERE user_id=$1 AND listing_id=$7 AND kind=$8")
+                            .bind(m.user_id).bind(sent_at).bind(i64::from(message.id.0)).bind(detection_ms).bind(delivery_ms).bind(total_ms).bind(out.id).bind(kind).execute(&s.db).await.ok();
                         sqlx::query("UPDATE listings SET telegram_sent_at=$2,detection_latency_ms=$3,delivery_latency_ms=$4,total_latency_ms=$5 WHERE id=$1")
                             .bind(out.id).bind(sent_at).bind(detection_ms).bind(delivery_ms).bind(total_ms).execute(&s.db).await.ok();
                     }
