@@ -1,6 +1,6 @@
 use crate::{app::AppState, models::Listing};
 use anyhow::Result;
-use teloxide::{prelude::*, types::{ChatId, InputFile, ParseMode, InlineKeyboardButton, InlineKeyboardMarkup, Message}};
+use teloxide::{prelude::*, types::{ChatId, InputFile, ParseMode, InlineKeyboardButton, InlineKeyboardMarkup, Message, InputMediaPhoto, InputMedia}};
 use url::Url;
 
 pub async fn run(_state: AppState) -> Result<()> {
@@ -21,8 +21,7 @@ pub async fn run(_state: AppState) -> Result<()> {
 
 fn esc(value: &str) -> String { value.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace("\"","&quot;") }
 
-pub async fn notify(chat_id: i64, listing: &Listing, kind: &str, old_price: Option<f64>) -> Result<Message> {
-    let bot = Bot::new(std::env::var("TELEGRAM_BOT_TOKEN")?);
+fn build_text(listing: &Listing, kind: &str, old_price: Option<f64>) -> String {
     let mut text = if kind == "price_drop" {
         let old = old_price.unwrap_or(0.0);
         let new = listing.price.unwrap_or(0.0);
@@ -45,14 +44,26 @@ pub async fn notify(chat_id: i64, listing: &Listing, kind: &str, old_price: Opti
         text.push_str(&format!("\n\n📝 <b>Описание</b>\n{}", esc(&short)));
     }
     text.push_str(&format!("\n\n🔗 <a href=\"{}\">Открыть объявление</a>", esc(&listing.url)));
+    text
+}
 
+pub async fn notify(chat_id: i64, listing: &Listing, kind: &str, old_price: Option<f64>) -> Result<Message> {
+    let bot = Bot::new(std::env::var("TELEGRAM_BOT_TOKEN")?);
     let recipient = ChatId(chat_id);
+    let mut text = build_text(listing, kind, old_price);
     if text.chars().count() > 1000 { text = text.chars().take(997).collect::<String>() + "..."; }
-    if let Some(image) = listing.images.first() {
-        if let Ok(url) = image.parse::<Url>() {
-            bot.send_photo(recipient, InputFile::url(url)).caption(text).parse_mode(ParseMode::Html).await?;
-            return Ok(bot.send_photo(recipient, InputFile::url(url)).caption(text).parse_mode(ParseMode::Html).await?);
-        }
+
+    let images: Vec<Url> = listing.images.iter().filter_map(|s| s.parse::<Url>().ok()).take(10).collect();
+    if images.is_empty() {
+        return Ok(bot.send_message(recipient, text).parse_mode(ParseMode::Html).await?);
     }
-    Ok(bot.send_message(recipient, text).parse_mode(ParseMode::Html).await?)
+
+    let mut media: Vec<InputMedia> = Vec::with_capacity(images.len());
+    for (i, url) in images.into_iter().enumerate() {
+        let mut photo = InputMediaPhoto::new(InputFile::url(url));
+        if i == 0 { photo = photo.caption(text.clone()).parse_mode(ParseMode::Html); }
+        media.push(InputMedia::Photo(photo));
+    }
+    let messages = bot.send_media_group(recipient, media).await?;
+    messages.into_iter().next().ok_or_else(|| anyhow::anyhow!("Telegram returned empty media group"))
 }
