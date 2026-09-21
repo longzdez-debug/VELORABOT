@@ -1,6 +1,6 @@
 use crate::{app::AppState, models::Listing};
 use anyhow::Result;
-use teloxide::{prelude::*, types::{ChatId, InputFile, ParseMode}};
+use teloxide::{prelude::*, types::{ChatId, InputFile, ParseMode, InlineKeyboardButton, InlineKeyboardMarkup}};
 use url::Url;
 
 pub async fn run(_state: AppState) -> Result<()> {
@@ -10,7 +10,8 @@ pub async fn run(_state: AppState) -> Result<()> {
         if let Some(text) = msg.text() {
             if text.starts_with("/start") {
                 let url = std::env::var("MINIAPP_URL").unwrap_or_default();
-                bot.send_message(msg.chat.id, format!("VELORA\n\nНастройки находятся в Mini App.\n{}", url)).await?;
+                let keyboard = InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::url("⚡ Открыть VELORA", url.parse()?)]]);
+                bot.send_message(msg.chat.id, "VELORA\n\nМониторинг работает через Mini App.").reply_markup(keyboard).await?;
             }
         }
         respond(())
