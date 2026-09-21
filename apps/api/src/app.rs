@@ -211,7 +211,7 @@ async fn ingest_listing(State(s): State<AppState>, headers: HeaderMap, Json(inpu
             }
         }
     }
-    let _: Option<String> = redis::cmd("EVAL")
+    let _: Option<i64> = redis::cmd("EVAL")
         .arg("if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end")
         .arg(1).arg(&lock_key).arg(&lock_token)
         .query_async(&mut redis).await.ok();
