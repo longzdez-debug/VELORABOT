@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS notifications(
  monitor_id uuid REFERENCES monitors(id) ON DELETE SET NULL,
  listing_id uuid NOT NULL REFERENCES listings(id) ON DELETE CASCADE,
  kind text NOT NULL,
- sent_at timestamptz NOT NULL DEFAULT now(),
+ sent_at timestamptz,
  telegram_message_id bigint,
  detection_latency_ms bigint,
  delivery_latency_ms bigint,
@@ -18,3 +18,6 @@ ALTER TABLE listings ADD COLUMN IF NOT EXISTS telegram_sent_at timestamptz;
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS detection_latency_ms bigint;
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS delivery_latency_ms bigint;
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS total_latency_ms bigint;
+
+ALTER TABLE notifications ALTER COLUMN sent_at DROP NOT NULL;
+ALTER TABLE notifications ALTER COLUMN sent_at DROP DEFAULT;
