@@ -1,6 +1,11 @@
 use crate::{db, market, models::*, telegram};
 use axum::{extract::{Path, State}, http::{HeaderMap, StatusCode}, routing::{get, post, delete}, Json, Router};
 use chrono::Utc;
+use hmac::{Hmac, Mac};
+use serde::Deserialize;
+use sha2::Sha256;
+use subtle::ConstantTimeEq;
+use urlencoding;
 use redis::AsyncCommands;
 use sqlx::PgPool;
 use std::{env};
@@ -19,11 +24,29 @@ impl AppState {
     }
 }
 
+#[derive(Deserialize)]
+struct TgUser { id: i64 }
+
 fn user_id(headers: &HeaderMap) -> Result<i64, StatusCode> {
-    headers.get("x-telegram-user-id")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse().ok())
-        .ok_or(StatusCode::UNAUTHORIZED)
+    let init = headers.get("x-telegram-init-data").and_then(|v| v.to_str().ok()).ok_or(StatusCode::UNAUTHORIZED)?;
+    let mut parts: Vec<(&str,&str)> = init.split('&').filter_map(|p| { let mut i=p.splitn(2,'='); Some((i.next()?,i.next().unwrap_or(""))) }).collect();
+    let hash = parts.iter().find(|(k,_)| *k=="hash").map(|(_,v)| *v).ok_or(StatusCode::UNAUTHORIZED)?;
+    parts.retain(|(k,_)| *k!="hash");
+    parts.sort_by(|a,b| a.0.cmp(b.0));
+    let check = parts.iter().map(|(k,v)| format!("{}={}",k,v)).collect::<Vec<_>>().join("\n");
+    type H = Hmac<Sha256>;
+    let token = std::env::var("TELEGRAM_BOT_TOKEN").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut key = H::new_from_slice(b"WebAppData").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    key.update(token.as_bytes());
+    let secret = key.finalize().into_bytes();
+    let mut mac = H::new_from_slice(&secret).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    mac.update(check.as_bytes());
+    let expected = hex::encode(mac.finalize().into_bytes());
+    if expected.as_bytes().ct_eq(hash.as_bytes()).unwrap_u8()!=1 { return Err(StatusCode::UNAUTHORIZED); }
+    let raw = parts.iter().find(|(k,_)| *k=="user").map(|(_,v)| *v).ok_or(StatusCode::UNAUTHORIZED)?;
+    let decoded = urlencoding::decode(raw).map_err(|_| StatusCode::UNAUTHORIZED)?;
+    let user: TgUser = serde_json::from_str(&decoded).map_err(|_| StatusCode::UNAUTHORIZED)?;
+    Ok(user.id)
 }
 
 pub fn router(state: AppState) -> Router {
