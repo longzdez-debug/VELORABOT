@@ -1,0 +1,35 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: velora
+      POSTGRES_USER: velora
+      POSTGRES_PASSWORD: velora
+    ports: ["5432:5432"]
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U velora -d velora"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    volumes: [redis_data:/data]
+  api:
+    build: { context: ., dockerfile: apps/api/Dockerfile }
+    env_file: .env
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_started }
+    ports: ["8080:8080"]
+  browser-collector:
+    build: { context: ., dockerfile: apps/browser-collector/Dockerfile }
+    env_file: .env
+    depends_on: [api]
+  miniapp:
+    build: { context: ., dockerfile: apps/miniapp/Dockerfile }
+    ports: ["5173:80"]
+volumes:
+  postgres_data:
+  redis_data:
