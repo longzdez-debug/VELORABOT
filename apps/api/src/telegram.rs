@@ -96,3 +96,82 @@ pub async fn notify(chat_id: i64, listing: &Listing, kind: &str, old_price: Opti
     messages.into_iter().next()
         .ok_or_else(|| anyhow::anyhow!("Telegram returned empty media group"))
 }
+
+pub async fn retry_pending(state: AppState) {
+    loop {
+        match retry_once(&state).await {
+            Ok(count) if count > 0 => tracing::info!(count, "notification retry worker processed pending notifications"),
+            Ok(_) => {}
+            Err(error) => tracing::error!(%error, "notification retry worker failed"),
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    }
+}
+
+async fn retry_once(state: &AppState) -> Result<u64> {
+    use redis::AsyncCommands;
+    use sqlx::Row;
+
+    let mut redis = state.redis.get_multiplexed_async_connection().await?;
+    let rows = sqlx::query(
+        "SELECT n.id,n.user_id,n.monitor_id,n.listing_id,n.kind,n.attempts,u.telegram_id,
+                l.id,l.kufar_id,l.url,l.title,l.description,l.price,l.currency,l.location,l.images,
+                l.published_at,l.first_seen_at,l.last_seen_at,l.market_price,l.market_confidence,l.status,
+                ph.price AS previous_price
+         FROM notifications n
+         JOIN users u ON u.id=n.user_id
+         JOIN listings l ON l.id=n.listing_id
+         LEFT JOIN LATERAL (
+             SELECT price FROM price_history
+             WHERE listing_id=l.id ORDER BY observed_at DESC OFFSET 1 LIMIT 1
+         ) ph ON true
+         WHERE n.status='pending' AND n.next_attempt_at <= now()
+         ORDER BY n.id
+         LIMIT 20"
+    ).fetch_all(&state.db).await?;
+
+    let mut processed = 0u64;
+    for row in rows {
+        let id: i64 = row.try_get("id")?;
+        let lock_key = format!("velora:notification:{}", id);
+        let claimed: bool = redis.set_nx(&lock_key, "1").await.unwrap_or(false);
+        if !claimed { continue; }
+        let _: bool = redis.expire(&lock_key, 30).await.unwrap_or(false);
+
+        let listing = Listing {
+            id: row.try_get("id")?,
+            kufar_id: row.try_get("kufar_id")?,
+            url: row.try_get("url")?,
+            title: row.try_get("title")?,
+            description: row.try_get("description")?,
+            price: row.try_get("price")?,
+            currency: row.try_get("currency")?,
+            location: row.try_get("location")?,
+            images: row.try_get("images")?,
+            published_at: row.try_get("published_at")?,
+            first_seen_at: row.try_get("first_seen_at")?,
+            last_seen_at: row.try_get("last_seen_at")?,
+            market_price: row.try_get("market_price")?,
+            market_confidence: row.try_get("market_confidence")?,
+            status: row.try_get("status")?,
+        };
+        let chat_id: i64 = row.try_get("telegram_id")?;
+        let kind: String = row.try_get("kind")?;
+        let old_price: Option<f64> = row.try_get("previous_price")?;
+
+        match notify(chat_id, &listing, &kind, old_price).await {
+            Ok(message) => {
+                sqlx::query("UPDATE notifications SET status='sent',sent_at=now(),telegram_message_id=$2,last_error=NULL WHERE id=$1")
+                    .bind(id).bind(i64::from(message.id.0)).execute(&state.db).await?;
+                processed += 1;
+            }
+            Err(error) => {
+                let attempts: i32 = row.try_get("attempts")?;
+                let next_seconds = (2_i64.pow(attempts.min(8) as u32)).min(300);
+                sqlx::query("UPDATE notifications SET attempts=attempts+1,last_error=$2,next_attempt_at=now()+make_interval(secs => $3) WHERE id=$1")
+                    .bind(id).bind(error.to_string()).bind(next_seconds as f64).execute(&state.db).await?;
+            }
+        }
+    }
+    Ok(processed)
+}
