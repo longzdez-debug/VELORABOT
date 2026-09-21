@@ -140,7 +140,7 @@ async fn ingest_listing(State(s): State<AppState>, headers: HeaderMap, Json(inpu
         tokio::time::sleep(std::time::Duration::from_millis(75)).await;
     }
     if !lock_acquired {
-        if let Some(row) = sqlx::query_as::<_, ListingRow>("SELECT id,kufar_id,url,title,description,price,currency,location,images,published_at,first_seen_at,last_seen_at,market_price,market_confidence,status FROM listings WHERE kufar_id=$1")
+        if let Some(row) = sqlx::query_as::<_, ListingRow>("SELECT id,kufar_id,url,title,description,price,currency,location,images,published_at,first_seen_at,last_seen_at,market_price,market_confidence,status,attributes FROM listings WHERE kufar_id=$1")
             .bind(&input.kufar_id).fetch_optional(&s.db).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)? {
             return Ok(Json(row.into()));
         }
@@ -151,7 +151,7 @@ async fn ingest_listing(State(s): State<AppState>, headers: HeaderMap, Json(inpu
     let first_seen_claim: bool = redis.set_nx(&fingerprint_key, "1").await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let _: bool = redis.expire(&fingerprint_key, 300).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if !first_seen_claim {
-        if let Some(row) = sqlx::query_as::<_, ListingRow>("SELECT id,kufar_id,url,title,description,price,currency,location,images,published_at,first_seen_at,last_seen_at,market_price,market_confidence,status FROM listings WHERE kufar_id=$1")
+        if let Some(row) = sqlx::query_as::<_, ListingRow>("SELECT id,kufar_id,url,title,description,price,currency,location,images,published_at,first_seen_at,last_seen_at,market_price,market_confidence,status,attributes FROM listings WHERE kufar_id=$1")
             .bind(&input.kufar_id).fetch_optional(&s.db).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)? {
             return Ok(Json(row.into()));
         }
