@@ -3,4 +3,5 @@ WORKDIR /app
 COPY apps/http-collector/package.json ./
 RUN npm install --omit=dev
 COPY apps/http-collector/src ./src
+USER node
 CMD ["npm","start"]
