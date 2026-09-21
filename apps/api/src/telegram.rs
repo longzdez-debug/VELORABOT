@@ -125,7 +125,7 @@ async fn retry_once(state: &AppState) -> Result<u64> {
              SELECT price FROM price_history
              WHERE listing_id=l.id ORDER BY observed_at DESC OFFSET 1 LIMIT 1
          ) ph ON true
-         WHERE n.status='pending' AND n.next_attempt_at <= now()
+         WHERE n.status='pending' AND n.sent_at IS NULL AND n.next_attempt_at <= now()
          ORDER BY n.id
          LIMIT 20"
     ).fetch_all(&state.db).await?;
