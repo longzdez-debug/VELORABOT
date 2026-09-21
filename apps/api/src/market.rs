@@ -35,6 +35,17 @@ fn weighted_median(values: &mut [(f64, f64)]) -> Option<f64> {
 pub async fn estimate(pool: &PgPool, title: &str, exclude_id: Option<uuid::Uuid>) -> (Option<f64>, Option<f64>) {
     let wanted = tokens(title);
     if wanted.is_empty() { return (None, None); }
+    let cache_key = format!("market:{}", { let mut v: Vec<_> = wanted.iter().cloned().collect(); v.sort(); v.join("|") });
+    if let Ok(url) = std::env::var("REDIS_URL") {
+        if let Ok(client) = redis::Client::open(url) {
+            if let Ok(mut conn) = client.get_multiplexed_async_connection().await {
+                if let Ok(Some(raw)) = redis::AsyncCommands::get::<_, Option<String>>(&mut conn, &cache_key).await {
+                    let mut p = raw.split(':');
+                    if let (Some(a), Some(b)) = (p.next(), p.next()) { if let (Ok(price), Ok(conf)) = (a.parse::<f64>(), b.parse::<f64>()) { return (Some(price), Some(conf)); } }
+                }
+            }
+        }
+    }
 
     let rows = sqlx::query_as::<_, Candidate>(
         "SELECT title, price, first_seen_at FROM listings
@@ -70,5 +81,15 @@ pub async fn estimate(pool: &PgPool, title: &str, exclude_id: Option<uuid::Uuid>
     let sample_factor = (filtered.len() as f64 / 25.0).min(1.0);
     let weight_total: f64 = filtered.iter().map(|(_, w)| *w).sum();
     let confidence = (sample_factor * (weight_total / 20.0).min(1.0)).clamp(0.0, 1.0);
-    (market, Some(confidence))
+    let result = (market, Some(confidence));
+    if let (Some(price), Some(conf)) = result {
+        if let Ok(url) = std::env::var("REDIS_URL") {
+            if let Ok(client) = redis::Client::open(url) {
+                if let Ok(mut conn) = client.get_multiplexed_async_connection().await {
+                    let _: Result<(), _> = redis::AsyncCommands::set_ex(&mut conn, &cache_key, format!("{price}:{conf}"), 15).await;
+                }
+            }
+        }
+    }
+    result
 }
