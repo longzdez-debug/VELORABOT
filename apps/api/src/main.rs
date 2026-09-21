@@ -7,7 +7,6 @@ mod telegram;
 use anyhow::Result;
 use dotenvy::dotenv;
 use app::AppState;
-use std::env;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
