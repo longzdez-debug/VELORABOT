@@ -1,6 +1,6 @@
 use crate::{app::AppState, models::Listing};
 use anyhow::Result;
-use teloxide::{prelude::*, types::{ChatId, InputFile, ParseMode, InlineKeyboardButton, InlineKeyboardMarkup}};
+use teloxide::{prelude::*, types::{ChatId, InputFile, ParseMode, InlineKeyboardButton, InlineKeyboardMarkup, Message}};
 use url::Url;
 
 pub async fn run(_state: AppState) -> Result<()> {
@@ -21,7 +21,7 @@ pub async fn run(_state: AppState) -> Result<()> {
 
 fn esc(value: &str) -> String { value.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace("\"","&quot;") }
 
-pub async fn notify(chat_id: i64, listing: &Listing, kind: &str, old_price: Option<f64>) -> Result<()> {
+pub async fn notify(chat_id: i64, listing: &Listing, kind: &str, old_price: Option<f64>) -> Result<Message> {
     let bot = Bot::new(std::env::var("TELEGRAM_BOT_TOKEN")?);
     let mut text = if kind == "price_drop" {
         let old = old_price.unwrap_or(0.0);
@@ -51,9 +51,8 @@ pub async fn notify(chat_id: i64, listing: &Listing, kind: &str, old_price: Opti
     if let Some(image) = listing.images.first() {
         if let Ok(url) = image.parse::<Url>() {
             bot.send_photo(recipient, InputFile::url(url)).caption(text).parse_mode(ParseMode::Html).await?;
-            return Ok(());
+            return Ok(bot.send_photo(recipient, InputFile::url(url)).caption(text).parse_mode(ParseMode::Html).await?);
         }
     }
-    bot.send_message(recipient, text).parse_mode(ParseMode::Html).await?;
-    Ok(())
+    Ok(bot.send_message(recipient, text).parse_mode(ParseMode::Html).await?)
 }
