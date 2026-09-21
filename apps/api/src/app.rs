@@ -6,21 +6,17 @@ use serde::Deserialize;
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
 use urlencoding;
-use redis::AsyncCommands;
 use sqlx::{PgPool, Row};
 use std::{env, collections::hash_map::DefaultHasher, hash::{Hash, Hasher}};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use uuid::Uuid;
 
 #[derive(Clone)]
-pub struct AppState { pub db: PgPool, pub redis: redis::Client }
+pub struct AppState { pub db: PgPool }
 
 impl AppState {
     pub async fn new() -> anyhow::Result<Self> {
-        Ok(Self {
-            db: db::connect().await?,
-            redis: redis::Client::open(env::var("REDIS_URL")?)?
-        })
+        Ok(Self { db: db::connect().await? })
     }
 }
 
@@ -179,33 +175,9 @@ async fn ingest_listing(State(s): State<AppState>, headers: HeaderMap, Json(inpu
     let expected = std::env::var("COLLECTOR_TOKEN").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let supplied = headers.get("x-collector-token").and_then(|v| v.to_str().ok()).unwrap_or_default();
     if supplied != expected { return Err(StatusCode::UNAUTHORIZED); }
-    let mut redis = s.redis.get_multiplexed_async_connection().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    // Redis is optional in the free deployment. PostgreSQL's unique kufar_id and
+    // notification constraints provide the durable race-safe deduplication.
     let fingerprint = { let mut h = DefaultHasher::new(); input.kufar_id.hash(&mut h); input.url.hash(&mut h); input.title.trim().to_lowercase().hash(&mut h); input.price.map(|v| (v * 100.0).round() as i64).hash(&mut h); format!("{:016x}", h.finish()) };
-    let lock_key = format!("velora:lock:{}", input.kufar_id);
-    let lock_token = Uuid::new_v4().to_string();
-    let mut lock_acquired = false;
-    for _ in 0..6 {
-        lock_acquired = redis.set_nx(&lock_key, &lock_token).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        if lock_acquired { break; }
-        tokio::time::sleep(std::time::Duration::from_millis(75)).await;
-    }
-    if !lock_acquired {
-        if let Some(row) = sqlx::query_as::<_, ListingRow>("SELECT id,kufar_id,url,title,description,price,currency,location,images,published_at,first_seen_at,last_seen_at,market_price,market_confidence,status,attributes FROM listings WHERE kufar_id=$1")
-            .bind(&input.kufar_id).fetch_optional(&s.db).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)? {
-            return Ok(Json(row.into()));
-        }
-    }
-    let _: bool = redis.expire(&lock_key, 5).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let fingerprint_key = format!("velora:fingerprint:{}", fingerprint);
-    let first_seen_claim: bool = redis.set_nx(&fingerprint_key, "1").await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let _: bool = redis.expire(&fingerprint_key, 300).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    if !first_seen_claim {
-        if let Some(row) = sqlx::query_as::<_, ListingRow>("SELECT id,kufar_id,url,title,description,price,currency,location,images,published_at,first_seen_at,last_seen_at,market_price,market_confidence,status,attributes FROM listings WHERE kufar_id=$1")
-            .bind(&input.kufar_id).fetch_optional(&s.db).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)? {
-            return Ok(Json(row.into()));
-        }
-    }
     let previous = sqlx::query_scalar::<_, f64>("SELECT price FROM listings WHERE kufar_id=$1").bind(&input.kufar_id).fetch_optional(&s.db).await.ok().flatten();
     let existed = sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM listings WHERE kufar_id=$1)").bind(&input.kufar_id).fetch_one(&s.db).await.unwrap_or(false);
     let id = Uuid::new_v4();
@@ -304,10 +276,6 @@ async fn ingest_listing(State(s): State<AppState>, headers: HeaderMap, Json(inpu
             }
         }
     }
-    let _: Option<i64> = redis::cmd("EVAL")
-        .arg("if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end")
-        .arg(1).arg(&lock_key).arg(&lock_token)
-        .query_async(&mut redis).await.ok();
     Ok(Json(out))
 }
 
