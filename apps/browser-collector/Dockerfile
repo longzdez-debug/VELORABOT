@@ -3,4 +3,5 @@ WORKDIR /app
 COPY apps/browser-collector/package.json .
 RUN npm install --omit=dev
 COPY apps/browser-collector/src ./src
+USER pwuser
 CMD ["npm","start"]
