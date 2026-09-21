@@ -106,7 +106,7 @@ async fn ingest_listing(State(s): State<AppState>, Json(input): Json<IngestListi
     let mut redis = s.redis.get_multiplexed_async_connection().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let key = format!("velora:seen:{}", input.kufar_id);
     let first: bool = redis.set_nx(&key, "1").await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let _: () = redis.expire(&key, 86400).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let _: bool = redis.expire(&key, 86400).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let previous = sqlx::query_scalar::<_, f64>("SELECT price FROM listings WHERE kufar_id=$1").bind(&input.kufar_id).fetch_optional(&s.db).await.ok().flatten();
     let id = Uuid::new_v4();
     let now = Utc::now();
