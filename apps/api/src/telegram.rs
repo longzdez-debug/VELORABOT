@@ -116,7 +116,7 @@ async fn retry_once(state: &AppState) -> Result<u64> {
     let rows = sqlx::query(
         "SELECT n.id AS notification_id,n.user_id,n.monitor_id,n.listing_id,n.kind,n.attempts,u.telegram_id,
                 l.id AS listing_uuid,l.kufar_id,l.url,l.title,l.description,l.price,l.currency,l.location,l.images,
-                l.published_at,l.first_seen_at,l.last_seen_at,l.market_price,l.market_confidence,l.status,
+                l.published_at,l.first_seen_at,l.last_seen_at,l.market_price,l.market_confidence,l.status,l.attributes,
                 ph.price AS previous_price
          FROM notifications n
          JOIN users u ON u.id=n.user_id
@@ -154,6 +154,7 @@ async fn retry_once(state: &AppState) -> Result<u64> {
             market_price: row.try_get("market_price")?,
             market_confidence: row.try_get("market_confidence")?,
             status: row.try_get("status")?,
+            attributes: row.try_get("attributes")?,
         };
         let chat_id: i64 = row.try_get("telegram_id")?;
         let kind: String = row.try_get("kind")?;
