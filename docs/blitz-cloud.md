@@ -35,9 +35,16 @@ VITE_API_URL=https://<your-api>.blitz.cloud
 
 VITE_API_URL is read at build time, so set it before building/rebuilding the Mini App.
 
-## Important Redis note
+## Redis is optional
 
-The normal VELORA Compose deployment uses Redis for ingest locks, short-lived fingerprint deduplication and market hot-cache. The blitz.cloud free plan currently provides one managed database, so PostgreSQL and Redis cannot simply be created as two free managed databases on the same account. Keep Redis external for the full current behavior, or add a dedicated single-instance fallback before running without Redis.
+VELORA now has a PostgreSQL-only free mode. Redis is no longer required for:
+- collector ingest;
+- durable listing deduplication;
+- Telegram notification claiming/retries.
+
+If REDIS_URL is present, the market engine still uses Redis as a short-lived hot cache. If it is absent, market estimates are calculated directly from PostgreSQL.
+
+For the free blitz.cloud deployment, choose PostgreSQL as the single managed database and simply omit REDIS_URL.
 
 ## Deployment order
 
