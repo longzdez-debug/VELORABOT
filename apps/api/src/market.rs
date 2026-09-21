@@ -32,8 +32,6 @@ fn weighted_median(values:&mut[(f64,f64)])->Option<f64>{if values.is_empty(){ret
 
 pub async fn estimate(pool:&PgPool,title:&str,description:Option<&str>,exclude_id:Option<uuid::Uuid>)->(Option<f64>,Option<f64>){
  let wanted=tokens(title);if wanted.is_empty(){return(None,None)}let identity=identity_tokens(title);let attrs=extract_attributes(title,description);
- let mut key_parts:Vec<_>=wanted.iter().cloned().collect();key_parts.sort();let cache_key=format!("market:v3:{}:{}",key_parts.join("|"),serde_json::to_string(&attrs).unwrap_or_default());
- if let Ok(url)=std::env::var("REDIS_URL"){if let Ok(client)=redis::Client::open(url){if let Ok(mut conn)=client.get_multiplexed_async_connection().await{if let Ok(Some(raw))=redis::AsyncCommands::get::<_,Option<String>>(&mut conn,&cache_key).await{let mut p=raw.split(':');if let(Some(a),Some(b))=(p.next(),p.next()){if let(Ok(price),Ok(conf))=(a.parse::<f64>(),b.parse::<f64>()){return(Some(price),Some(conf));}}}}}}
  let rows=sqlx::query_as::<_,Candidate>("SELECT title,price,first_seen_at,attributes FROM listings WHERE price IS NOT NULL AND price>0 AND status='active' AND ($1::uuid IS NULL OR id<>$1) ORDER BY first_seen_at DESC LIMIT 1000").bind(exclude_id).fetch_all(pool).await.unwrap_or_default();
  let now=Utc::now();let mut scored=Vec::new();
  for row in rows{
@@ -46,9 +44,7 @@ pub async fn estimate(pool:&PgPool,title:&str,description:Option<&str>,exclude_i
  }
  if scored.len()<5{return(None,None)}
  scored.sort_by(|a,b|a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));let q1=scored[scored.len()/4].0;let q3=scored[(scored.len()*3)/4].0;let iqr=(q3-q1).max(0.0);let low=if iqr>0.0{q1-1.5*iqr}else{q1*0.7};let high=if iqr>0.0{q3+1.5*iqr}else{q3*1.3};let mut filtered:Vec<_>=scored.into_iter().filter(|(p,_)|*p>=low&&*p<=high).collect();if filtered.len()<5{return(None,None)}
- let market=weighted_median(&mut filtered);let sample_factor=(filtered.len()as f64/25.0).min(1.0);let total:f64=filtered.iter().map(|(_,w)|*w).sum();let confidence=(sample_factor*(total/20.0).min(1.0)).clamp(0.0,1.0);let result=(market,Some(confidence));
- if let(Some(price),Some(conf))=result{if let Ok(url)=std::env::var("REDIS_URL"){if let Ok(client)=redis::Client::open(url){if let Ok(mut conn)=client.get_multiplexed_async_connection().await{let _:Result<(),_>=redis::AsyncCommands::set_ex(&mut conn,&cache_key,format!("{price}:{conf}"),15).await;}}}}
- result
+ let market=weighted_median(&mut filtered);let sample_factor=(filtered.len()as f64/25.0).min(1.0);let total:f64=filtered.iter().map(|(_,w)|*w).sum();let confidence=(sample_factor*(total/20.0).min(1.0)).clamp(0.0,1.0);(market,Some(confidence))
 }
 
 #[cfg(test)]
