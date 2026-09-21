@@ -115,7 +115,9 @@ async fn ingest_listing(State(s): State<AppState>, Json(input): Json<IngestListi
         .fetch_one(&s.db).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     sqlx::query("INSERT INTO monitor_listings(monitor_id,listing_id) VALUES($1,$2) ON CONFLICT DO NOTHING").bind(input.monitor_id).bind(row.id).execute(&s.db).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if let Some(p) = input.price {
-        sqlx::query("INSERT INTO price_history(listing_id,price) VALUES($1,$2)").bind(row.id).bind(p).execute(&s.db).await.ok();
+        if previous.map(|old| (old - p).abs() > f64::EPSILON).unwrap_or(true) {
+            sqlx::query("INSERT INTO price_history(listing_id,price) VALUES($1,$2)").bind(row.id).bind(p).execute(&s.db).await.ok();
+        }
     }
     let (market_price, confidence) = market::estimate(&s.db, &row.title).await;
     sqlx::query("UPDATE listings SET market_price=$2,market_confidence=$3 WHERE id=$1").bind(row.id).bind(market_price).bind(confidence).execute(&s.db).await.ok();
@@ -126,9 +128,32 @@ async fn ingest_listing(State(s): State<AppState>, Json(input): Json<IngestListi
     if let Some(m) = monitor {
         let chat_id = sqlx::query_scalar::<_, i64>("SELECT telegram_id FROM users WHERE id=$1").bind(m.user_id).fetch_optional(&s.db).await.ok().flatten();
         if let Some(chat) = chat_id {
-            let kind = if !first && previous.is_some() && input.price.unwrap_or(0.0) < previous.unwrap_or(0.0) && m.notify_price_drop { "price_drop" } else if first && m.notify_new { "new" } else { "" };
+            let new_price = input.price.unwrap_or(0.0);
+            let old_price = previous.unwrap_or(new_price);
+            let drop_byn = old_price - new_price;
+            let drop_pct = if old_price > 0.0 { drop_byn / old_price * 100.0 } else { 0.0 };
+            let below_market = out.market_price.map(|market| new_price < market).unwrap_or(false);
+            let drop_ok = drop_byn >= m.min_drop_byn || drop_pct >= m.min_drop_percent;
+            let kind = if !first && previous.is_some() && drop_byn > 0.0 && m.notify_price_drop && drop_ok { "price_drop" }
+                else if first && m.notify_new { "new" }
+                else if first && m.notify_below_market && below_market { "new" }
+                else { "" };
             if !kind.is_empty() {
-                let _ = telegram::notify(chat, &out, kind, previous).await;
+                let inserted = sqlx::query_scalar::<_, i64>("INSERT INTO notifications(user_id,monitor_id,listing_id,kind) VALUES($1,$2,$3,$4) ON CONFLICT(user_id,listing_id,kind) DO NOTHING RETURNING id")
+                    .bind(m.user_id).bind(m.id).bind(out.id).bind(kind).fetch_optional(&s.db).await.ok().flatten().is_some();
+                if inserted {
+                    let send_started = Utc::now();
+                    if telegram::notify(chat, &out, kind, previous).await.is_ok() {
+                        let sent_at = Utc::now();
+                        let detection_ms = out.first_seen_at.signed_duration_since(out.published_at.unwrap_or(out.first_seen_at)).num_milliseconds().max(0);
+                        let delivery_ms = sent_at.signed_duration_since(send_started).num_milliseconds().max(0);
+                        let total_ms = sent_at.signed_duration_since(out.published_at.unwrap_or(out.first_seen_at)).num_milliseconds().max(0);
+                        sqlx::query("UPDATE notifications SET sent_at=$2,detection_latency_ms=$3,delivery_latency_ms=$4,total_latency_ms=$5 WHERE user_id=$1 AND listing_id=$6 AND kind=$7")
+                            .bind(m.user_id).bind(sent_at).bind(detection_ms).bind(delivery_ms).bind(total_ms).bind(out.id).bind(kind).execute(&s.db).await.ok();
+                        sqlx::query("UPDATE listings SET telegram_sent_at=$2,detection_latency_ms=$3,delivery_latency_ms=$4,total_latency_ms=$5 WHERE id=$1")
+                            .bind(out.id).bind(sent_at).bind(detection_ms).bind(delivery_ms).bind(total_ms).execute(&s.db).await.ok();
+                    }
+                }
             }
         }
     }
