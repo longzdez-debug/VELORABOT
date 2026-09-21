@@ -50,3 +50,31 @@ pub async fn estimate(pool:&PgPool,title:&str,description:Option<&str>,exclude_i
  if let(Some(price),Some(conf))=result{if let Ok(url)=std::env::var("REDIS_URL"){if let Ok(client)=redis::Client::open(url){if let Ok(mut conn)=client.get_multiplexed_async_connection().await{let _:Result<(),_>=redis::AsyncCommands::set_ex(&mut conn,&cache_key,format!("{price}:{conf}"),15).await;}}}}
  result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extracts_phone_attributes() {
+        let a = extract_attributes("Apple iPhone 15 Pro 256GB", Some("RAM 8 GB, 2023, б/у"));
+        assert_eq!(a["brand"], "apple");
+        assert_eq!(a["storage_gb"], 256);
+        assert_eq!(a["ram_gb"], 8);
+        assert_eq!(a["year"], 2023);
+        assert_eq!(a["condition"], "used");
+    }
+
+    #[test]
+    fn conflicting_attributes_are_rejected() {
+        let wanted = serde_json::json!({"brand":"apple","storage_gb":256});
+        let candidate = serde_json::json!({"brand":"samsung","storage_gb":256});
+        assert_eq!(attr_score(&wanted, &candidate), 0.0);
+    }
+
+    #[test]
+    fn weighted_median_is_not_simple_average() {
+        let mut values = vec![(1000.0, 1.0), (1100.0, 1.0), (5000.0, 0.1)];
+        assert_eq!(weighted_median(&mut values), Some(1100.0));
+    }
+}
