@@ -1,6 +1,7 @@
 mod app;
 mod db;
 mod market;
+mod lifecycle;
 mod models;
 mod telegram;
 
@@ -23,6 +24,11 @@ async fn main() -> Result<()> {
         if let Err(e) = telegram::run(bot_state).await {
             tracing::error!(error = %e, "telegram bot stopped");
         }
+    });
+
+    let lifecycle_state = state.clone();
+    tokio::spawn(async move {
+        lifecycle::run(lifecycle_state).await;
     });
 
     let retry_state = state.clone();
