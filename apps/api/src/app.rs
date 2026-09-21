@@ -133,9 +133,10 @@ async fn ingest_listing(State(s): State<AppState>, headers: HeaderMap, Json(inpu
     let mut redis = s.redis.get_multiplexed_async_connection().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let fingerprint = { let mut h = DefaultHasher::new(); input.kufar_id.hash(&mut h); input.url.hash(&mut h); input.title.trim().to_lowercase().hash(&mut h); input.price.map(|v| (v * 100.0).round() as i64).hash(&mut h); format!("{:016x}", h.finish()) };
     let lock_key = format!("velora:lock:{}", input.kufar_id);
+    let lock_token = Uuid::new_v4().to_string();
     let mut lock_acquired = false;
-    for _ in 0..3 {
-        lock_acquired = redis.set_nx(&lock_key, &fingerprint).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    for _ in 0..6 {
+        lock_acquired = redis.set_nx(&lock_key, &lock_token).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         if lock_acquired { break; }
         tokio::time::sleep(std::time::Duration::from_millis(75)).await;
     }
@@ -210,6 +211,10 @@ async fn ingest_listing(State(s): State<AppState>, headers: HeaderMap, Json(inpu
             }
         }
     }
+    let _: Option<String> = redis::cmd("EVAL")
+        .arg("if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end")
+        .arg(1).arg(&lock_key).arg(&lock_token)
+        .query_async(&mut redis).await.ok();
     Ok(Json(out))
 }
 
