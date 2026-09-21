@@ -132,9 +132,10 @@ async fn ingest_listing(State(s): State<AppState>, headers: HeaderMap, Json(inpu
     if supplied != expected { return Err(StatusCode::UNAUTHORIZED); }
     let mut redis = s.redis.get_multiplexed_async_connection().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let key = format!("velora:seen:{}", input.kufar_id);
-    let first: bool = redis.set_nx(&key, "1").await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let _first_seen_claim: bool = redis.set_nx(&key, "1").await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let _: bool = redis.expire(&key, 86400).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let previous = sqlx::query_scalar::<_, f64>("SELECT price FROM listings WHERE kufar_id=$1").bind(&input.kufar_id).fetch_optional(&s.db).await.ok().flatten();
+    let existed = sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM listings WHERE kufar_id=$1)").bind(&input.kufar_id).fetch_one(&s.db).await.unwrap_or(false);
     let id = Uuid::new_v4();
     let now = Utc::now();
     let row = sqlx::query_as::<_, ListingRow>("INSERT INTO listings (id,kufar_id,url,title,description,price,currency,location,images,published_at,first_seen_at,last_seen_at,status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11,'active') ON CONFLICT(kufar_id) DO UPDATE SET title=EXCLUDED.title,description=COALESCE(EXCLUDED.description,listings.description),price=EXCLUDED.price,location=COALESCE(EXCLUDED.location,listings.location),images=CASE WHEN cardinality(EXCLUDED.images)>0 THEN EXCLUDED.images ELSE listings.images END,last_seen_at=now(),updated_at=now() RETURNING id,kufar_id,url,title,description,price,currency,location,images,published_at,first_seen_at,last_seen_at,market_price,market_confidence,status")
@@ -146,7 +147,8 @@ async fn ingest_listing(State(s): State<AppState>, headers: HeaderMap, Json(inpu
             sqlx::query("INSERT INTO price_history(listing_id,price) VALUES($1,$2)").bind(row.id).bind(p).execute(&s.db).await.ok();
         }
     }
-    let (market_price, confidence) = market::estimate(&s.db, &row.title).await;
+    if !existed { sqlx::query("UPDATE listings SET first_detected_at=$2 WHERE id=$1").bind(row.id).bind(now).execute(&s.db).await.ok(); }
+    let (market_price, confidence) = market::estimate(&s.db, &row.title, Some(row.id)).await;
     sqlx::query("UPDATE listings SET market_price=$2,market_confidence=$3 WHERE id=$1").bind(row.id).bind(market_price).bind(confidence).execute(&s.db).await.ok();
     let mut out: Listing = row.into();
     out.market_price = market_price; out.market_confidence = confidence;
@@ -161,9 +163,9 @@ async fn ingest_listing(State(s): State<AppState>, headers: HeaderMap, Json(inpu
             let drop_pct = if old_price > 0.0 { drop_byn / old_price * 100.0 } else { 0.0 };
             let below_market = out.market_price.map(|market| new_price < market).unwrap_or(false);
             let drop_ok = drop_byn >= m.min_drop_byn || drop_pct >= m.min_drop_percent;
-            let kind = if !first && previous.is_some() && drop_byn > 0.0 && m.notify_price_drop && drop_ok { "price_drop" }
-                else if first && m.notify_new { "new" }
-                else if first && m.notify_below_market && below_market { "new" }
+            let kind = if existed && previous.is_some() && drop_byn > 0.0 && m.notify_price_drop && drop_ok { "price_drop" }
+                else if !existed && m.notify_new { "new" }
+                else if !existed && m.notify_below_market && below_market { "new" }
                 else { "" };
             if !kind.is_empty() {
                 let inserted = sqlx::query_scalar::<_, i64>("INSERT INTO notifications(user_id,monitor_id,listing_id,kind) VALUES($1,$2,$3,$4) ON CONFLICT(user_id,listing_id,kind) DO NOTHING RETURNING id")
@@ -172,7 +174,8 @@ async fn ingest_listing(State(s): State<AppState>, headers: HeaderMap, Json(inpu
                     let send_started = Utc::now();
                     if telegram::notify(chat, &out, kind, previous).await.is_ok() {
                         let sent_at = Utc::now();
-                        let detection_ms = out.first_seen_at.signed_duration_since(out.published_at.unwrap_or(out.first_seen_at)).num_milliseconds().max(0);
+                        let detected_at = sqlx::query_scalar::<_, chrono::DateTime<Utc>>("SELECT COALESCE(first_detected_at, first_seen_at) FROM listings WHERE id=$1").bind(out.id).fetch_one(&s.db).await.unwrap_or(out.first_seen_at);
+                        let detection_ms = detected_at.signed_duration_since(out.published_at.unwrap_or(detected_at)).num_milliseconds().max(0);
                         let delivery_ms = sent_at.signed_duration_since(send_started).num_milliseconds().max(0);
                         let total_ms = sent_at.signed_duration_since(out.published_at.unwrap_or(out.first_seen_at)).num_milliseconds().max(0);
                         sqlx::query("UPDATE notifications SET sent_at=$2,detection_latency_ms=$3,delivery_latency_ms=$4,total_latency_ms=$5 WHERE user_id=$1 AND listing_id=$6 AND kind=$7")
