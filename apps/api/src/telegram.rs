@@ -168,8 +168,8 @@ async fn retry_once(state: &AppState) -> Result<u64> {
             Err(error) => {
                 let attempts: i32 = row.try_get("attempts")?;
                 let next_seconds = (2_i64.pow(attempts.min(8) as u32)).min(300);
-                sqlx::query("UPDATE notifications SET attempts=attempts+1,last_error=$2,next_attempt_at=now()+make_interval(secs => $3) WHERE id=$1")
-                    .bind(id).bind(error.to_string()).bind(next_seconds as f64).execute(&state.db).await?;
+                sqlx::query("UPDATE notifications SET attempts=attempts+1,last_error=$2,next_attempt_at=now()+($3 * interval '1 second') WHERE id=$1")
+                    .bind(id).bind(error.to_string()).bind(next_seconds).execute(&state.db).await?;
             }
         }
     }
