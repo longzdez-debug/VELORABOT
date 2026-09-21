@@ -160,8 +160,9 @@ async fn ingest_listing(State(s): State<AppState>, headers: HeaderMap, Json(inpu
     let existed = sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM listings WHERE kufar_id=$1)").bind(&input.kufar_id).fetch_one(&s.db).await.unwrap_or(false);
     let id = Uuid::new_v4();
     let now = Utc::now();
-    let row = sqlx::query_as::<_, ListingRow>("INSERT INTO listings (id,kufar_id,url,title,description,price,currency,location,images,published_at,first_seen_at,last_seen_at,status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11,'active') ON CONFLICT(kufar_id) DO UPDATE SET title=EXCLUDED.title,description=COALESCE(EXCLUDED.description,listings.description),price=EXCLUDED.price,location=COALESCE(EXCLUDED.location,listings.location),images=CASE WHEN cardinality(EXCLUDED.images)>0 THEN EXCLUDED.images ELSE listings.images END,last_seen_at=now(),updated_at=now() RETURNING id,kufar_id,url,title,description,price,currency,location,images,published_at,first_seen_at,last_seen_at,market_price,market_confidence,status,attributes")
-        .bind(id).bind(&input.kufar_id).bind(&input.url).bind(&input.title).bind(&input.description).bind(input.price).bind(input.currency.unwrap_or("BYN".into())).bind(&input.location).bind(input.images.unwrap_or_default()).bind(input.published_at).bind(now)
+    let attributes = market::extract_attributes(&input.title, input.description.as_deref());
+    let row = sqlx::query_as::<_, ListingRow>("INSERT INTO listings (id,kufar_id,url,title,description,price,currency,location,images,published_at,first_seen_at,last_seen_at,attributes,status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11,$12,'active') ON CONFLICT(kufar_id) DO UPDATE SET title=EXCLUDED.title,description=COALESCE(EXCLUDED.description,listings.description),price=EXCLUDED.price,location=COALESCE(EXCLUDED.location,listings.location),images=CASE WHEN cardinality(EXCLUDED.images)>0 THEN EXCLUDED.images ELSE listings.images END,last_seen_at=now(),updated_at=now() RETURNING id,kufar_id,url,title,description,price,currency,location,images,published_at,first_seen_at,last_seen_at,market_price,market_confidence,status,attributes")
+        .bind(id).bind(&input.kufar_id).bind(&input.url).bind(&input.title).bind(&input.description).bind(input.price).bind(input.currency.unwrap_or("BYN".into())).bind(&input.location).bind(input.images.unwrap_or_default()) .bind(input.published_at).bind(now).bind(&attributes)
         .fetch_one(&s.db).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     sqlx::query("INSERT INTO monitor_listings(monitor_id,listing_id) VALUES($1,$2) ON CONFLICT DO NOTHING").bind(input.monitor_id).bind(row.id).execute(&s.db).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if let Some(p) = input.price {
@@ -170,7 +171,7 @@ async fn ingest_listing(State(s): State<AppState>, headers: HeaderMap, Json(inpu
         }
     }
     if !existed { sqlx::query("UPDATE listings SET first_detected_at=$2 WHERE id=$1").bind(row.id).bind(now).execute(&s.db).await.ok(); }
-    let (market_price, confidence) = market::estimate(&s.db, &row.title, Some(row.id)).await;
+    let (market_price, confidence) = market::estimate(&s.db, &row.title, row.description.as_deref(), Some(row.id)).await;
     sqlx::query("UPDATE listings SET market_price=$2,market_confidence=$3 WHERE id=$1").bind(row.id).bind(market_price).bind(confidence).execute(&s.db).await.ok();
     let mut out: Listing = row.into();
     out.market_price = market_price; out.market_confidence = confidence;
