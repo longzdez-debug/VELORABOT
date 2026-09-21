@@ -5,7 +5,6 @@ const TOKEN=process.env.COLLECTOR_TOKEN||"";
 const FALLBACK_INTERVAL=Number(process.env.COLLECTOR_INTERVAL_MS||1500);
 const browser=await chromium.launch({headless:true});
 const context=await browser.newContext({userAgent:"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/153 Safari/537.36"});
-const page=await context.newPage();
 const headers={"x-collector-token":TOKEN,"content-type":"application/json"};
 
 async function monitors(){const r=await fetch(API+"/api/collector/monitors",{headers});return r.ok?r.json():[]}
@@ -19,6 +18,7 @@ function normalize(raw){
   return {kufar_id:id,url:url||"https://www.kufar.by/item/"+id,title:title.slice(0,240),price:Number.isFinite(price)?price:null,description:raw.description??raw.text??null,location:raw.location??raw.city??raw.region??null,images:Array.isArray(raw.images)?raw.images.filter(Boolean).slice(0,10):[]};
 }
 async function scan(m){
+  const page=await context.newPage();
   const network=[];
   const onResponse=async response=>{
     try{
@@ -41,6 +41,7 @@ async function scan(m){
   const dom=await page.evaluate(()=>{const a=[];for(const x of document.querySelectorAll("a[href]")){const h=x.href;if(!/kufar\.by\//i.test(h))continue;const id=(h.match(/(\d{6,})/)||[])[1];if(!id)continue;const c=x.closest("article,li")||x.parentElement;const raw=(c?.innerText||x.innerText||"").replace(/\s+/g," ").trim();const p=(raw.match(/([\d\s]+)\s*(?:BYN|р\.?)/i)||[])[1];const imgs=[...((c?.querySelectorAll("img"))||[])].map(i=>i.src).filter(Boolean).slice(0,10);a.push({kufar_id:id,url:h,title:(x.innerText||raw).trim().slice(0,240),price:p?Number(p.replace(/\s/g,"")):null,images:imgs})}return a});
   const unique=[...new Map([...network,...dom].map(x=>[x.kufar_id,x])).values()].slice(0,200);
   await Promise.all(unique.map(item=>fetch(API+"/api/ingest/listing",{method:"POST",headers,body:JSON.stringify({...item,monitor_id:m.id,currency:"BYN"})}).catch(()=>{})));
+  await page.close();
 }
 while(true){
   try{
