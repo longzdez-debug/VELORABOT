@@ -18,7 +18,9 @@ pub async fn run(_state: AppState) -> Result<()> {
     Ok(())
 }
 
-fn esc(value: &str) -> String { value.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace("\"","&quot;") }\n\npub async fn notify(chat_id: i64, listing: &Listing, kind: &str, old_price: Option<f64>) -> Result<()> {
+fn esc(value: &str) -> String { value.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace("\"","&quot;") }
+
+pub async fn notify(chat_id: i64, listing: &Listing, kind: &str, old_price: Option<f64>) -> Result<()> {
     let bot = Bot::new(std::env::var("TELEGRAM_BOT_TOKEN")?);
     let mut text = if kind == "price_drop" {
         let old = old_price.unwrap_or(0.0);
@@ -43,7 +45,8 @@ fn esc(value: &str) -> String { value.replace("&","&amp;").replace("<","&lt;").r
     }
     text.push_str(&format!("\n\n🔗 <a href=\"{}\">Открыть объявление</a>", esc(&listing.url)));
 
-    let recipient = ChatId(chat_id);\n    if text.chars().count() > 1000 { text = text.chars().take(997).collect::<String>() + "..."; }
+    let recipient = ChatId(chat_id);
+    if text.chars().count() > 1000 { text = text.chars().take(997).collect::<String>() + "..."; }
     if let Some(image) = listing.images.first() {
         if let Ok(url) = image.parse::<Url>() {
             bot.send_photo(recipient, InputFile::url(url)).caption(text).parse_mode(ParseMode::Html).await?;
