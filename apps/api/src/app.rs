@@ -158,8 +158,10 @@ fn normalized_text(text: &str) -> String {
 
 fn title_similarity(a: &str, b: &str) -> f64 {
     use std::collections::HashSet;
-    let aa: HashSet<_> = normalized_text(a).split_whitespace().filter(|x| x.len() >= 2).collect();
-    let bb: HashSet<_> = normalized_text(b).split_whitespace().filter(|x| x.len() >= 2).collect();
+    let na = normalized_text(a);
+    let nb = normalized_text(b);
+    let aa: HashSet<_> = na.split_whitespace().filter(|x| x.len() >= 2).collect();
+    let bb: HashSet<_> = nb.split_whitespace().filter(|x| x.len() >= 2).collect();
     if aa.is_empty() || bb.is_empty() { return 0.0; }
     aa.intersection(&bb).count() as f64 / aa.union(&bb).count() as f64
 }
