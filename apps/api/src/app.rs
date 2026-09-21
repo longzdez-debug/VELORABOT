@@ -53,7 +53,7 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/api/monitors", get(list_monitors).post(create_monitor))
-        .route("/api/monitors/{id}", delete(delete_monitor))
+        .route("/api/monitors/{id}", delete(delete_monitor).put(update_monitor))
         .route("/api/listings", get(list_listings))
         .route("/api/collector/monitors", get(collector_monitors))
         .route("/api/ingest/listing", post(ingest_listing))
@@ -88,6 +88,27 @@ async fn delete_monitor(State(s): State<AppState>, headers: HeaderMap, Path(id):
     let user = db::create_user(&s.db, uid).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     sqlx::query("DELETE FROM monitors WHERE id=$1 AND user_id=$2").bind(id).bind(user).execute(&s.db).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct UpdateMonitor {
+    enabled: Option<bool>,
+    interval_ms: Option<i64>,
+    notify_new: Option<bool>,
+    notify_price_drop: Option<bool>,
+    notify_below_market: Option<bool>,
+    min_drop_byn: Option<f64>,
+    min_drop_percent: Option<f64>,
+}
+
+async fn update_monitor(State(s): State<AppState>, headers: HeaderMap, Path(id): Path<Uuid>, Json(input): Json<UpdateMonitor>) -> Result<Json<Monitor>, StatusCode> {
+    let uid = user_id(&headers)?;
+    let user = db::create_user(&s.db, uid).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let row = sqlx::query_as::<_, MonitorRow>(
+        "UPDATE monitors SET enabled=COALESCE($3,enabled), interval_ms=COALESCE($4,interval_ms), notify_new=COALESCE($5,notify_new), notify_price_drop=COALESCE($6,notify_price_drop), notify_below_market=COALESCE($7,notify_below_market), min_drop_byn=COALESCE($8,min_drop_byn), min_drop_percent=COALESCE($9,min_drop_percent) WHERE id=$1 AND user_id=$2 RETURNING id,user_id,url,name,enabled,interval_ms,notify_new,notify_price_drop,notify_below_market,min_drop_byn,min_drop_percent,created_at")
+        .bind(id).bind(user).bind(input.enabled).bind(input.interval_ms.map(|v| v.clamp(1000,60000))).bind(input.notify_new).bind(input.notify_price_drop).bind(input.notify_below_market).bind(input.min_drop_byn.map(|v| v.max(0.0))).bind(input.min_drop_percent.map(|v| v.max(0.0))).fetch_optional(&s.db).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    Ok(Json(row.into()))
 }
 
 async fn list_listings(State(s): State<AppState>, headers: HeaderMap) -> Result<Json<Vec<Listing>>, StatusCode> {
