@@ -1,0 +1,1 @@
+{"name":"velora-browser-collector","version":"1.0.0","private":true,"type":"module","scripts":{"start":"node src/index.js"},"dependencies":{"playwright":"^1.55.0"}}
