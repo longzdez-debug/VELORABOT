@@ -7,7 +7,7 @@ use sha2::Sha256;
 use subtle::ConstantTimeEq;
 use urlencoding;
 use redis::AsyncCommands;
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use std::{env, collections::hash_map::DefaultHasher, hash::{Hash, Hasher}};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use uuid::Uuid;
