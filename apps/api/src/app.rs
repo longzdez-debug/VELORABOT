@@ -132,7 +132,31 @@ async fn ingest_listing(State(s): State<AppState>, headers: HeaderMap, Json(inpu
     if supplied != expected { return Err(StatusCode::UNAUTHORIZED); }
     let mut redis = s.redis.get_multiplexed_async_connection().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let fingerprint = { let mut h = DefaultHasher::new(); input.kufar_id.hash(&mut h); input.url.hash(&mut h); input.title.trim().to_lowercase().hash(&mut h); input.price.map(|v| (v * 100.0).round() as i64).hash(&mut h); format!("{:016x}", h.finish()) };
-    let lock_key = format!("velora:lock:{}", input.kufar_id);\n    let lock_acquired: bool = redis.set_nx(&lock_key, &fingerprint).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;\n    let _: bool = redis.expire(&lock_key, 5).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;\n    let fingerprint_key = format!("velora:fingerprint:{}", fingerprint);\n    let _first_seen_claim: bool = redis.set_nx(&fingerprint_key, "1").await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;\n    let _: bool = redis.expire(&fingerprint_key, 300).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;\n    let previous = sqlx::query_scalar::<_, f64>("SELECT price FROM listings WHERE kufar_id=$1").bind(&input.kufar_id).fetch_optional(&s.db).await.ok().flatten();
+    let lock_key = format!("velora:lock:{}", input.kufar_id);
+    let mut lock_acquired = false;
+    for _ in 0..3 {
+        lock_acquired = redis.set_nx(&lock_key, &fingerprint).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        if lock_acquired { break; }
+        tokio::time::sleep(std::time::Duration::from_millis(75)).await;
+    }
+    if !lock_acquired {
+        if let Some(row) = sqlx::query_as::<_, ListingRow>("SELECT id,kufar_id,url,title,description,price,currency,location,images,published_at,first_seen_at,last_seen_at,market_price,market_confidence,status FROM listings WHERE kufar_id=$1")
+            .bind(&input.kufar_id).fetch_optional(&s.db).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)? {
+            return Ok(Json(row.into()));
+        }
+    }
+    let _: bool = redis.expire(&lock_key, 5).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let fingerprint_key = format!("velora:fingerprint:{}", fingerprint);
+    let first_seen_claim: bool = redis.set_nx(&fingerprint_key, "1").await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let _: bool = redis.expire(&fingerprint_key, 300).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if !first_seen_claim {
+        if let Some(row) = sqlx::query_as::<_, ListingRow>("SELECT id,kufar_id,url,title,description,price,currency,location,images,published_at,first_seen_at,last_seen_at,market_price,market_confidence,status FROM listings WHERE kufar_id=$1")
+            .bind(&input.kufar_id).fetch_optional(&s.db).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)? {
+            return Ok(Json(row.into()));
+        }
+    }
+    let previous = sqlx::query_scalar::<_, f64>("SELECT price FROM listings WHERE kufar_id=$1").bind(&input.kufar_id).fetch_optional(&s.db).await.ok().flatten();
     let existed = sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM listings WHERE kufar_id=$1)").bind(&input.kufar_id).fetch_one(&s.db).await.unwrap_or(false);
     let id = Uuid::new_v4();
     let now = Utc::now();
