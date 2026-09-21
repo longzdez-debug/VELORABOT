@@ -97,12 +97,18 @@ async fn list_listings(State(s): State<AppState>, headers: HeaderMap) -> Result<
     Ok(Json(rows.into_iter().map(Into::into).collect()))
 }
 
-async fn collector_monitors(State(s): State<AppState>) -> Result<Json<Vec<Monitor>>, StatusCode> {
+async fn collector_monitors(State(s): State<AppState>, headers: HeaderMap) -> Result<Json<Vec<Monitor>>, StatusCode> {
+    let expected = std::env::var("COLLECTOR_TOKEN").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let supplied = headers.get("x-collector-token").and_then(|v| v.to_str().ok()).unwrap_or_default();
+    if supplied != expected { return Err(StatusCode::UNAUTHORIZED); }
     let rows = sqlx::query_as::<_, MonitorRow>("SELECT id,user_id,url,name,enabled,interval_ms,notify_new,notify_price_drop,notify_below_market,min_drop_byn,min_drop_percent,created_at FROM monitors WHERE enabled=true ORDER BY created_at").fetch_all(&s.db).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(rows.into_iter().map(Into::into).collect()))
 }
 
-async fn ingest_listing(State(s): State<AppState>, Json(input): Json<IngestListing>) -> Result<Json<Listing>, StatusCode> {
+async fn ingest_listing(State(s): State<AppState>, headers: HeaderMap, Json(input): Json<IngestListing>) -> Result<Json<Listing>, StatusCode> {
+    let expected = std::env::var("COLLECTOR_TOKEN").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let supplied = headers.get("x-collector-token").and_then(|v| v.to_str().ok()).unwrap_or_default();
+    if supplied != expected { return Err(StatusCode::UNAUTHORIZED); }
     let mut redis = s.redis.get_multiplexed_async_connection().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let key = format!("velora:seen:{}", input.kufar_id);
     let first: bool = redis.set_nx(&key, "1").await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
