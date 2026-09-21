@@ -3,7 +3,7 @@ import { chromium } from "playwright";
 const API=process.env.API_PUBLIC_URL||"http://api:8080";
 const TOKEN=process.env.COLLECTOR_TOKEN||"";
 const FALLBACK_INTERVAL=Number(process.env.COLLECTOR_INTERVAL_MS||1500);
-const browser=await chromium.launch({headless:true});
+const browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_PATH||"/usr/bin/chromium",args:["--no-sandbox"]});
 const context=await browser.newContext({userAgent:"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/153 Safari/537.36"});
 const headers={"x-collector-token":TOKEN,"content-type":"application/json"};
 
