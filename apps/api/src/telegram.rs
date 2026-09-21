@@ -110,10 +110,8 @@ pub async fn retry_pending(state: AppState) {
 }
 
 async fn retry_once(state: &AppState) -> Result<u64> {
-    use redis::AsyncCommands;
     use sqlx::Row;
 
-    let mut redis = state.redis.get_multiplexed_async_connection().await?;
     let rows = sqlx::query(
         "SELECT n.id AS notification_id,n.user_id,n.monitor_id,n.listing_id,n.kind,n.attempts,u.telegram_id,
                 l.id AS listing_uuid,l.kufar_id,l.url,l.title,l.description,l.price,l.currency,l.location,l.images,
@@ -134,10 +132,14 @@ async fn retry_once(state: &AppState) -> Result<u64> {
     let mut processed = 0u64;
     for row in rows {
         let id: i64 = row.try_get("notification_id")?;
-        let lock_key = format!("velora:notification:{}", id);
-        let claimed: bool = redis.set_nx(&lock_key, "1").await.unwrap_or(false);
+
+        // Atomic PostgreSQL claim replaces the Redis worker lock.
+        let claimed: bool = sqlx::query_scalar(
+            "UPDATE notifications SET status='processing', attempts=attempts+1
+             WHERE id=$1 AND status='pending' AND sent_at IS NULL
+             RETURNING true"
+        ).bind(id).fetch_optional(&state.db).await?.is_some();
         if !claimed { continue; }
-        let _: bool = redis.expire(&lock_key, 30).await.unwrap_or(false);
 
         let listing = Listing {
             id: row.try_get("listing_uuid")?,
@@ -160,6 +162,7 @@ async fn retry_once(state: &AppState) -> Result<u64> {
         let chat_id: i64 = row.try_get("telegram_id")?;
         let kind: String = row.try_get("kind")?;
         let old_price: Option<f64> = row.try_get("previous_price")?;
+        let attempts: i32 = row.try_get("attempts")?;
 
         match notify(chat_id, &listing, &kind, old_price).await {
             Ok(message) => {
@@ -168,9 +171,8 @@ async fn retry_once(state: &AppState) -> Result<u64> {
                 processed += 1;
             }
             Err(error) => {
-                let attempts: i32 = row.try_get("attempts")?;
                 let next_seconds = (2_i64.pow(attempts.min(8) as u32)).min(300);
-                sqlx::query("UPDATE notifications SET attempts=attempts+1,last_error=$2,next_attempt_at=now()+($3 * interval '1 second') WHERE id=$1")
+                sqlx::query("UPDATE notifications SET status='pending',last_error=$2,next_attempt_at=now()+($3 * interval '1 second') WHERE id=$1")
                     .bind(id).bind(error.to_string()).bind(next_seconds).execute(&state.db).await?;
             }
         }
