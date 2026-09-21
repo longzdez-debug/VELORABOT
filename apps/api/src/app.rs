@@ -57,6 +57,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/listings", get(list_listings))
         .route("/api/collector/monitors", get(collector_monitors))
         .route("/api/ingest/listing", post(ingest_listing))
+        .route("/api/collector/heartbeat", post(collector_heartbeat))
         .with_state(state)
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
@@ -126,6 +127,52 @@ async fn collector_monitors(State(s): State<AppState>, headers: HeaderMap) -> Re
     Ok(Json(rows.into_iter().map(Into::into).collect()))
 }
 
+
+#[derive(Deserialize)]
+struct CollectorHeartbeat {
+    monitor_id: Uuid,
+    collector: String,
+    observed_kufar_ids: Vec<String>,
+}
+
+async fn collector_heartbeat(State(s): State<AppState>, headers: HeaderMap, Json(input): Json<CollectorHeartbeat>) -> Result<StatusCode, StatusCode> {
+    let expected = std::env::var("COLLECTOR_TOKEN").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let supplied = headers.get("x-collector-token").and_then(|v| v.to_str().ok()).unwrap_or_default();
+    if supplied != expected { return Err(StatusCode::UNAUTHORIZED); }
+    if input.collector.trim().is_empty() || input.collector.len() > 64 { return Err(StatusCode::BAD_REQUEST); }
+    let exists = sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM monitors WHERE id=$1 AND enabled=true)")
+        .bind(input.monitor_id).fetch_one(&s.db).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if !exists { return Err(StatusCode::NOT_FOUND); }
+    sqlx::query("INSERT INTO monitor_collector_state(monitor_id,collector,last_success_at,last_listing_count,observed_kufar_ids)
+                 VALUES($1,$2,now(),$3,$4)
+                 ON CONFLICT(monitor_id,collector) DO UPDATE SET last_success_at=EXCLUDED.last_success_at,last_listing_count=EXCLUDED.last_listing_count,observed_kufar_ids=EXCLUDED.observed_kufar_ids")
+        .bind(input.monitor_id).bind(input.collector.trim()).bind(input.observed_kufar_ids.len() as i32).bind(input.observed_kufar_ids)
+        .execute(&s.db).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+fn normalized_text(text: &str) -> String {
+    text.to_lowercase().chars().map(|c| if c.is_alphanumeric() { c } else { ' ' }).collect::<String>()
+        .split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn title_similarity(a: &str, b: &str) -> f64 {
+    use std::collections::HashSet;
+    let aa: HashSet<_> = normalized_text(a).split_whitespace().filter(|x| x.len() >= 2).collect();
+    let bb: HashSet<_> = normalized_text(b).split_whitespace().filter(|x| x.len() >= 2).collect();
+    if aa.is_empty() || bb.is_empty() { return 0.0; }
+    aa.intersection(&bb).count() as f64 / aa.union(&bb).count() as f64
+}
+
+fn image_overlap(a: &[String], b: &[String]) -> f64 {
+    use std::collections::HashSet;
+    let norm = |s: &String| s.split('?').next().unwrap_or(s).rsplit('/').next().unwrap_or(s).to_lowercase();
+    let aa: HashSet<_> = a.iter().map(norm).collect();
+    let bb: HashSet<_> = b.iter().map(norm).collect();
+    if aa.is_empty() || bb.is_empty() { return 0.0; }
+    aa.intersection(&bb).count() as f64 / aa.len().min(bb.len()) as f64
+}
+
 async fn ingest_listing(State(s): State<AppState>, headers: HeaderMap, Json(input): Json<IngestListing>) -> Result<Json<Listing>, StatusCode> {
     let expected = std::env::var("COLLECTOR_TOKEN").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let supplied = headers.get("x-collector-token").and_then(|v| v.to_str().ok()).unwrap_or_default();
@@ -161,11 +208,55 @@ async fn ingest_listing(State(s): State<AppState>, headers: HeaderMap, Json(inpu
     let existed = sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM listings WHERE kufar_id=$1)").bind(&input.kufar_id).fetch_one(&s.db).await.unwrap_or(false);
     let id = Uuid::new_v4();
     let now = Utc::now();
-    let attributes = market::extract_attributes(&input.title, input.description.as_deref());
-    let row = sqlx::query_as::<_, ListingRow>("INSERT INTO listings (id,kufar_id,url,title,description,price,currency,location,images,published_at,first_seen_at,last_seen_at,attributes,status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11,$12,'active') ON CONFLICT(kufar_id) DO UPDATE SET title=EXCLUDED.title,description=COALESCE(EXCLUDED.description,listings.description),price=EXCLUDED.price,location=COALESCE(EXCLUDED.location,listings.location),images=CASE WHEN cardinality(EXCLUDED.images)>0 THEN EXCLUDED.images ELSE listings.images END,last_seen_at=now(),updated_at=now() RETURNING id,kufar_id,url,title,description,price,currency,location,images,published_at,first_seen_at,last_seen_at,market_price,market_confidence,status,attributes")
-        .bind(id).bind(&input.kufar_id).bind(&input.url).bind(&input.title).bind(&input.description).bind(input.price).bind(input.currency.unwrap_or("BYN".into())).bind(&input.location).bind(input.images.unwrap_or_default()) .bind(input.published_at).bind(now).bind(&attributes)
+    let description = input.description.clone();
+    let images = input.images.clone().unwrap_or_default();
+    let currency = input.currency.clone().unwrap_or_else(|| "BYN".into());
+    let attributes = market::extract_attributes(&input.title, description.as_deref());
+    let normalized_fingerprint = {
+        let base = format!("{}|{}|{}", normalized_text(&input.title), normalized_text(input.location.as_deref().unwrap_or_default()), input.price.map(|p| (p / 50.0).round() as i64).unwrap_or(0));
+        let mut h = DefaultHasher::new();
+        base.hash(&mut h);
+        format!("{:016x}", h.finish())
+    };
+    let relist_candidate: Option<Uuid> = if !existed {
+        let candidates = sqlx::query("SELECT l.id,l.title,l.location,l.price,l.images FROM listings l JOIN monitor_listings ml ON ml.listing_id=l.id WHERE ml.monitor_id=$1 AND l.status IN ('stale','removed','relisted') AND l.first_seen_at >= now() - interval '90 days' ORDER BY l.last_seen_at DESC LIMIT 100")
+            .bind(input.monitor_id).fetch_all(&s.db).await.unwrap_or_default();
+        let mut best = None;
+        let mut best_score = 0.0;
+        for candidate in candidates {
+            let title: String = candidate.try_get("title").unwrap_or_default();
+            let location: Option<String> = candidate.try_get("location").ok().flatten();
+            let price: Option<f64> = candidate.try_get("price").ok().flatten();
+            let imgs: Vec<String> = candidate.try_get("images").unwrap_or_default();
+            let ts = title_similarity(&input.title, &title);
+            let loc = match (&input.location, &location) {
+                (Some(a),Some(b)) if normalized_text(a) == normalized_text(b) => 0.12,
+                _ => 0.0,
+            };
+            let price_score = match (input.price, price) {
+                (Some(a),Some(b)) if b > 0.0 => {
+                    let ratio = (a-b).abs()/b;
+                    if ratio <= 0.05 { 0.15 } else if ratio <= 0.15 { 0.08 } else { 0.0 }
+                },
+                _ => 0.0,
+            };
+            let img_score = image_overlap(&images, &imgs);
+            let score = ts*0.73 + loc + price_score + img_score.min(1.0)*0.35;
+            if score > best_score { best_score = score; best = Some(candidate.try_get::<Uuid,_>("id").unwrap()); }
+        }
+        if best_score >= 0.82 { best } else { None }
+    } else { None };
+    let row = sqlx::query_as::<_, ListingRow>("INSERT INTO listings (id,kufar_id,url,title,description,price,currency,location,images,published_at,first_seen_at,last_seen_at,attributes,status,normalized_fingerprint) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11,$12,'active',$13) ON CONFLICT(kufar_id) DO UPDATE SET url=EXCLUDED.url,title=EXCLUDED.title,description=COALESCE(EXCLUDED.description,listings.description),price=EXCLUDED.price,currency=EXCLUDED.currency,location=COALESCE(EXCLUDED.location,listings.location),images=CASE WHEN cardinality(EXCLUDED.images)>0 THEN EXCLUDED.images ELSE listings.images END,attributes=EXCLUDED.attributes,normalized_fingerprint=EXCLUDED.normalized_fingerprint,status='active',stale_since=NULL,removed_at=NULL,last_seen_at=now(),updated_at=now() RETURNING id,kufar_id,url,title,description,price,currency,location,images,published_at,first_seen_at,last_seen_at,market_price,market_confidence,status,attributes")
+        .bind(id).bind(&input.kufar_id).bind(&input.url).bind(&input.title).bind(&description).bind(input.price).bind(&currency).bind(&input.location).bind(&images).bind(input.published_at).bind(now).bind(&attributes).bind(&normalized_fingerprint)
         .fetch_one(&s.db).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     sqlx::query("INSERT INTO monitor_listings(monitor_id,listing_id) VALUES($1,$2) ON CONFLICT DO NOTHING").bind(input.monitor_id).bind(row.id).execute(&s.db).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if let Some(old_id) = relist_candidate {
+        sqlx::query("UPDATE listings SET relisted_from_listing_id=$2,status='active',stale_since=NULL,removed_at=NULL,updated_at=now() WHERE id=$1")
+            .bind(row.id).bind(old_id).execute(&s.db).await.ok();
+        sqlx::query("INSERT INTO listing_status_history(listing_id,from_status,to_status,reason) SELECT id,status,'relisted','new_listing_relisted' FROM listings WHERE id=$1")
+            .bind(old_id).execute(&s.db).await.ok();
+        sqlx::query("UPDATE listings SET status='relisted',updated_at=now() WHERE id=$1").bind(old_id).execute(&s.db).await.ok();
+    }
     if let Some(p) = input.price {
         if previous.map(|old| (old - p).abs() > f64::EPSILON).unwrap_or(true) {
             sqlx::query("INSERT INTO price_history(listing_id,price) VALUES($1,$2)").bind(row.id).bind(p).execute(&s.db).await.ok();
