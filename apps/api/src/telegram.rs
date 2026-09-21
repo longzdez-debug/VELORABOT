@@ -114,8 +114,8 @@ async fn retry_once(state: &AppState) -> Result<u64> {
 
     let mut redis = state.redis.get_multiplexed_async_connection().await?;
     let rows = sqlx::query(
-        "SELECT n.id,n.user_id,n.monitor_id,n.listing_id,n.kind,n.attempts,u.telegram_id,
-                l.id,l.kufar_id,l.url,l.title,l.description,l.price,l.currency,l.location,l.images,
+        "SELECT n.id AS notification_id,n.user_id,n.monitor_id,n.listing_id,n.kind,n.attempts,u.telegram_id,
+                l.id AS listing_uuid,l.kufar_id,l.url,l.title,l.description,l.price,l.currency,l.location,l.images,
                 l.published_at,l.first_seen_at,l.last_seen_at,l.market_price,l.market_confidence,l.status,
                 ph.price AS previous_price
          FROM notifications n
@@ -132,14 +132,14 @@ async fn retry_once(state: &AppState) -> Result<u64> {
 
     let mut processed = 0u64;
     for row in rows {
-        let id: i64 = row.try_get("id")?;
+        let id: i64 = row.try_get("notification_id")?;
         let lock_key = format!("velora:notification:{}", id);
         let claimed: bool = redis.set_nx(&lock_key, "1").await.unwrap_or(false);
         if !claimed { continue; }
         let _: bool = redis.expire(&lock_key, 30).await.unwrap_or(false);
 
         let listing = Listing {
-            id: row.try_get("id")?,
+            id: row.try_get("listing_uuid")?,
             kufar_id: row.try_get("kufar_id")?,
             url: row.try_get("url")?,
             title: row.try_get("title")?,
