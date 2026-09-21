@@ -9,6 +9,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - run: cargo fmt --all -- --check
       - run: cargo check -p velora-api
   miniapp:
     runs-on: ubuntu-latest
@@ -20,3 +21,17 @@ jobs:
         working-directory: apps/miniapp
       - run: npm run build
         working-directory: apps/miniapp
+  collectors:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 22}
+      - run: npm install
+        working-directory: apps/http-collector
+      - run: node --check src/index.js
+        working-directory: apps/http-collector
+      - run: npm install
+        working-directory: apps/browser-collector
+      - run: node --check src/index.js
+        working-directory: apps/browser-collector
