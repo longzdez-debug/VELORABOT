@@ -32,15 +32,16 @@ fn weighted_median(values: &mut [(f64, f64)]) -> Option<f64> {
     values.last().map(|x| x.0)
 }
 
-pub async fn estimate(pool: &PgPool, title: &str) -> (Option<f64>, Option<f64>) {
+pub async fn estimate(pool: &PgPool, title: &str, exclude_id: Option<uuid::Uuid>) -> (Option<f64>, Option<f64>) {
     let wanted = tokens(title);
     if wanted.is_empty() { return (None, None); }
 
     let rows = sqlx::query_as::<_, Candidate>(
         "SELECT title, price, first_seen_at FROM listings
          WHERE price IS NOT NULL AND price > 0 AND status='active'
+           AND ($1::uuid IS NULL OR id <> $1)
          ORDER BY first_seen_at DESC LIMIT 1000"
-    ).fetch_all(pool).await.unwrap_or_default();
+    ).bind(exclude_id).fetch_all(pool).await.unwrap_or_default();
 
     let now = Utc::now();
     let mut scored: Vec<(f64, f64)> = rows.into_iter().filter_map(|row| {
