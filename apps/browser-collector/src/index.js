@@ -41,6 +41,7 @@ async function scan(m){
   const dom=await page.evaluate(()=>{const a=[];for(const x of document.querySelectorAll("a[href]")){const h=x.href;if(!/kufar\.by\//i.test(h))continue;const id=(h.match(/(\d{6,})/)||[])[1];if(!id)continue;const c=x.closest("article,li")||x.parentElement;const raw=(c?.innerText||x.innerText||"").replace(/\s+/g," ").trim();const p=(raw.match(/([\d\s]+)\s*(?:BYN|р\.?)/i)||[])[1];const imgs=[...((c?.querySelectorAll("img"))||[])].map(i=>i.src).filter(Boolean).slice(0,10);a.push({kufar_id:id,url:h,title:(x.innerText||raw).trim().slice(0,240),price:p?Number(p.replace(/\s/g,"")):null,images:imgs})}return a});
   const unique=[...new Map([...network,...dom].map(x=>[x.kufar_id,x])).values()].slice(0,200);
   await Promise.all(unique.map(item=>fetch(API+"/api/ingest/listing",{method:"POST",headers,body:JSON.stringify({...item,monitor_id:m.id,currency:"BYN"})}).catch(()=>{})));
+  await fetch(API+"/api/collector/heartbeat",{method:"POST",headers,body:JSON.stringify({monitor_id:m.id,collector:"browser",observed_kufar_ids:unique.map(x=>x.kufar_id)})}).catch(()=>{});
   await page.close();
 }
 while(true){
