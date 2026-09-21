@@ -177,7 +177,6 @@ async fn ingest_listing(State(s): State<AppState>, headers: HeaderMap, Json(inpu
     if supplied != expected { return Err(StatusCode::UNAUTHORIZED); }
     // Redis is optional in the free deployment. PostgreSQL's unique kufar_id and
     // notification constraints provide the durable race-safe deduplication.
-    let fingerprint = { let mut h = DefaultHasher::new(); input.kufar_id.hash(&mut h); input.url.hash(&mut h); input.title.trim().to_lowercase().hash(&mut h); input.price.map(|v| (v * 100.0).round() as i64).hash(&mut h); format!("{:016x}", h.finish()) };
     let previous = sqlx::query_scalar::<_, f64>("SELECT price FROM listings WHERE kufar_id=$1").bind(&input.kufar_id).fetch_optional(&s.db).await.ok().flatten();
     let existed = sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM listings WHERE kufar_id=$1)").bind(&input.kufar_id).fetch_one(&s.db).await.unwrap_or(false);
     let id = Uuid::new_v4();
