@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -47,6 +48,7 @@ pub struct Listing {
     pub market_price: Option<f64>,
     pub market_confidence: Option<f64>,
     pub status: String,
+    pub attributes: Value,
 }
 
 #[derive(Debug, Deserialize)]
