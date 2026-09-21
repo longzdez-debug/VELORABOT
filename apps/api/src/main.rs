@@ -25,6 +25,11 @@ async fn main() -> Result<()> {
         }
     });
 
+    let retry_state = state.clone();
+    tokio::spawn(async move {
+        telegram::retry_pending(retry_state).await;
+    });
+
     let app = app::router(state);
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;
     axum::serve(listener, app).await?;
