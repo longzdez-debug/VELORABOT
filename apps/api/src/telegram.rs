@@ -1,6 +1,7 @@
 use crate::{app::AppState, models::Listing};
 use anyhow::Result;
-use teloxide::{prelude::*, types::{InputFile, ParseMode}};
+use teloxide::{prelude::*, types::{ChatId, InputFile, ParseMode}};
+use url::Url;
 
 pub async fn run(_state: AppState) -> Result<()> {
     let token = std::env::var("TELEGRAM_BOT_TOKEN")?;
@@ -13,7 +14,7 @@ pub async fn run(_state: AppState) -> Result<()> {
             }
         }
         respond(())
-    }).await?;
+    }).await;
     Ok(())
 }
 
@@ -42,10 +43,13 @@ pub async fn notify(chat_id: i64, listing: &Listing, kind: &str, old_price: Opti
     }
     text.push_str(&format!("\n\n🔗 <a href=\"{}\">Открыть объявление</a>", listing.url));
 
+    let recipient = ChatId(chat_id);
     if let Some(image) = listing.images.first() {
-        bot.send_photo(chat_id, InputFile::url(image.clone())).caption(text).parse_mode(ParseMode::Html).await?;
-    } else {
-        bot.send_message(chat_id, text).parse_mode(ParseMode::Html).await?;
+        if let Ok(url) = image.parse::<Url>() {
+            bot.send_photo(recipient, InputFile::url(url)).caption(text).parse_mode(ParseMode::Html).await?;
+            return Ok(());
+        }
     }
+    bot.send_message(recipient, text).parse_mode(ParseMode::Html).await?;
     Ok(())
 }
