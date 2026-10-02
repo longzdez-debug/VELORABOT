@@ -10,6 +10,7 @@ from app.config import settings
 from app.db import Session, Listing, PriceHistory
 from app.events import new_listing_event
 from app.pipeline import publish_listing_event
+from app.attributes import extract_attributes
 
 JSONLD = re.compile(
     r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
@@ -49,11 +50,18 @@ def _normalize(x, base):
         return None
     image = x.get("image") or ""
     image = image[0] if isinstance(image, list) and image else image
+    description = str(x.get("description") or "").strip()
+    attrs = extract_attributes(str(title), description)
     return {
         "source_id": hashlib.sha256(urljoin(base, str(url)).encode()).hexdigest()[:40],
         "url": urljoin(base, str(url)),
         "title": str(title).strip(),
-        "description_raw": str(x.get("description") or "").strip(),
+        "description_raw": description,
+        "model": attrs.model or "",
+        "condition": attrs.condition,
+        "storage_gb": attrs.storage_gb,
+        "memory_gb": attrs.memory_gb,
+        "fingerprint": hashlib.sha256((str(title).casefold()+"|"+description[:1000].casefold()+"|"+str(price)).encode()).hexdigest(),
         "price": price,
         "currency": str(offer.get("priceCurrency") or "BYN"),
         "image_url": str(image),
@@ -75,11 +83,18 @@ def _html_fallback(html, base):
         if not title or price is None or len(title) > 300:
             continue
         desc = node.find("p") or node.find(attrs={"class": re.compile("description|desc", re.I)})
+        desc_text = desc.get_text(" ", strip=True) if desc else ""
+        attrs = extract_attributes(title, desc_text)
         result.append({
             "source_id": hashlib.sha256(urljoin(base, a["href"]).encode()).hexdigest()[:40],
             "url": urljoin(base, a["href"]),
             "title": title,
-            "description_raw": desc.get_text(" ", strip=True) if desc else "",
+            "description_raw": desc_text,
+            "model": attrs.model or "",
+            "condition": attrs.condition,
+            "storage_gb": attrs.storage_gb,
+            "memory_gb": attrs.memory_gb,
+            "fingerprint": hashlib.sha256((title.casefold()+"|"+desc_text[:1000].casefold()+"|"+str(price)).encode()).hexdigest(),
             "price": price,
             "currency": "BYN",
             "image_url": "",
@@ -124,6 +139,11 @@ async def collect_url(url):
                     event = "PRICE_CHANGED"
                 if n["description_raw"]:
                     old.description_raw = n["description_raw"]
+                old.model = n.get("model") or old.model
+                old.condition = n.get("condition") or old.condition
+                old.storage_gb = n.get("storage_gb")
+                old.memory_gb = n.get("memory_gb")
+                old.fingerprint = n.get("fingerprint") or old.fingerprint
                 old.last_seen_at = datetime.utcnow()
                 changed.append((old.id, event, old.price, n["source_id"]))
             else:
