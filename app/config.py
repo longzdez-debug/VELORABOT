@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -10,7 +11,7 @@ class Settings(BaseSettings):
     collector_url: str = ""
     collector_urls: str = ""
     collector_interval_seconds: float = 2.0
-    kufar_queries_raw: str = ""
+    kufar_queries_raw: str = Field(default="", validation_alias="KUFAR_QUERIES")
     kufar_interval_ms: int = 1000
     kufar_size: int = 42
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
