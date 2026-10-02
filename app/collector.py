@@ -1,4 +1,4 @@
-import asyncio, hashlib, json, re
+import asyncio, hashlib, json, logging, re
 from datetime import datetime
 from urllib.parse import urljoin
 
@@ -12,6 +12,8 @@ from app.events import new_listing_event
 from app.pipeline import publish_listing_event
 from app.attributes import extract_attributes
 from app.duplicates import duplicate_key_for
+
+log = logging.getLogger(__name__)
 
 JSONLD = re.compile(
     r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
@@ -140,6 +142,7 @@ async def collect_url(url):
                     s.add(PriceHistory(listing_id=old.id, price=n["price"]))
                     old.price = n["price"]
                     event = "PRICE_CHANGED"
+                old.url = n["url"]
                 if n["description_raw"]:
                     old.description_raw = n["description_raw"]
                 old.model = n.get("model") or old.model
@@ -148,6 +151,10 @@ async def collect_url(url):
                 old.memory_gb = n.get("memory_gb")
                 old.fingerprint = n.get("fingerprint") or old.fingerprint
                 old.duplicate_key = n.get("duplicate_key") or old.duplicate_key
+                old.image_url = n.get("image_url") or old.image_url
+                old.location = n.get("location") or old.location
+                old.seller = n.get("seller") or old.seller
+                old.currency = n.get("currency") or old.currency
                 old.last_seen_at = datetime.utcnow()
                 changed.append((old.id, event, old.price, n["source_id"]))
             else:
@@ -175,5 +182,5 @@ async def run_collector():
             try:
                 await collect_url(url)
             except Exception:
-                pass
+                log.exception("generic collector failed url=%s", url)
         await asyncio.sleep(settings.collector_interval_seconds)
