@@ -151,7 +151,7 @@ async def listings(
         for x in rows:
             prices = await _comparable_prices(s, x)
             result.append(listing_json(
-                x, calculate_deal_score(x.price, prices, x.description_raw, comparable_count=len(prices))
+                x, calculate_deal_score(x.price, prices, x.description_raw, comparable_count=len(prices), observed_days=_observed_days(x))
             ))
         return [
             x for x in result
@@ -171,7 +171,7 @@ async def listing(listing_id: int):
         if not x:
             return {"error": "not_found"}
         prices = await _comparable_prices(s, x)
-        d = calculate_deal_score(x.price, prices, x.description_raw, comparable_count=len(prices))
+        d = calculate_deal_score(x.price, prices, x.description_raw, comparable_count=len(prices), observed_days=_observed_days(x))
         history = (await s.execute(
             select(PriceHistory).where(PriceHistory.listing_id == x.id)
             .order_by(PriceHistory.observed_at)
