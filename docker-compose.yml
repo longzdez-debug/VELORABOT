@@ -1,0 +1,19 @@
+services:
+  velora:
+    build: .
+    env_file: .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+      - redis
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: velora
+      POSTGRES_USER: velora
+      POSTGRES_PASSWORD: velora
+    ports: ["5432:5432"]
+  redis:
+    image: redis:7
+    ports: ["6379:6379"]
