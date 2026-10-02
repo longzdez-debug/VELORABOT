@@ -1,24 +1,24 @@
 import hashlib
-import time
 
 from aiogram import Bot
-from sqlalchemy import select\nfrom datetime import datetime, timedelta
+from sqlalchemy import select
 
 from app.db import Session, Listing, Alert, NotificationEvent, PriceHistory
 from app.scoring import calculate_deal_score
 from app.config import settings
 from app.alert_index import AlertIndex
+from app.comparables import comparable_prices
 
 
 def _match(alert: Alert, listing: Listing, score: int) -> bool:
-    text = f"{listing.title} {listing.description_raw}".lower()
+    text = f"{listing.title} {listing.description_raw}".casefold()
     if alert.query:
-        terms = [x for x in alert.query.lower().split() if x]
+        terms = [x for x in alert.query.casefold().split() if x]
         if not all(term in text for term in terms):
             return False
     if alert.max_price is not None and listing.price > alert.max_price:
         return False
-    if alert.region and alert.region.lower() not in listing.location.lower():
+    if alert.region and alert.region.casefold() not in listing.location.casefold():
         return False
     return score >= alert.min_score
 
@@ -32,12 +32,27 @@ async def evaluate_and_notify(listing_id: int, event_type: str = "NEW") -> int:
         if not listing:
             return 0
 
-        prices = list((await s.execute(
-            select(Listing.price)
-            .where(Listing.id != listing.id)
-            .limit(500)
-        )).scalars().all())
-        deal = calculate_deal_score(listing.price, prices, listing.description_raw)
+        prices = await comparable_prices(s, listing, limit=500)
+        deal = calculate_deal_score(
+            listing.price,
+            prices,
+            listing.description_raw,
+            comparable_count=len(prices),
+        )
+
+        previous_price = None
+        if event_type == "PRICE_CHANGED":
+            previous = list((await s.execute(
+                select(PriceHistory.price)
+                .where(PriceHistory.listing_id == listing.id)
+                .order_by(PriceHistory.observed_at.desc())
+                .limit(2)
+            )).scalars().all())
+            if len(previous) >= 2:
+                previous_price = float(previous[1])
+        price_drop_pct = None
+        if previous_price and listing.price < previous_price:
+            price_drop_pct = (previous_price - listing.price) / previous_price * 100
 
         index = AlertIndex()
         try:
@@ -88,13 +103,15 @@ async def evaluate_and_notify(listing_id: int, event_type: str = "NEW") -> int:
     tag = {"NEW": "🆕", "PRICE_CHANGED": "📉", "UPDATED": "♻️"}.get(event_type, "🔔")
     market = f"{deal.market_price:g} {listing.currency}" if deal.market_price is not None else "—"
     deviation = f"{deal.deviation_pct:.1f}%" if deal.deviation_pct is not None else "—"
+    drop_line = f"Снижение цены: {price_drop_pct:.1f}%\n" if price_drop_pct is not None else ""
     text = (
         f"{tag} VELORA {event_type}\n\n"
         f"{listing.title}\n"
         f"Цена: {listing.price:g} {listing.currency}\n"
         f"Market: {market}\n"
         f"Deal Score: {deal.score}/100\n"
-        f"Отклонение: {deviation}\n" + (f"Снижение цены: {price_drop_pct:.1f}%\n" if price_drop_pct is not None else "")
+        f"Отклонение: {deviation}\n"
+        f"{drop_line}"
         f"Риск: {deal.risk}/100 · Ликвидность: {deal.liquidity}/100\n\n"
         f"{listing.description_raw[:1800] or 'Описание не указано'}\n\n"
         f"{listing.url}"
@@ -106,7 +123,6 @@ async def evaluate_and_notify(listing_id: int, event_type: str = "NEW") -> int:
             try:
                 await bot.send_message(user_id, text)
             except Exception:
-                # One blocked/deleted Telegram account must not stop other alerts.
                 continue
     finally:
         await bot.session.close()
