@@ -128,6 +128,21 @@ async def _enrich_short_descriptions(items: list[dict]) -> None:
                     item["condition"] = attrs.condition
                     item["storage_gb"] = attrs.storage_gb
                     item["memory_gb"] = attrs.memory_gb
+                    item["fingerprint"] = hashlib.sha256(
+                        (
+                            item["title"].casefold()
+                            + "|"
+                            + description[:1000].casefold()
+                            + "|"
+                            + str(item["price"])
+                        ).encode()
+                    ).hexdigest()
+                    item["duplicate_key"] = duplicate_key_for(
+                        item["title"],
+                        item["model"],
+                        item["storage_gb"],
+                        item.get("image_url", ""),
+                    )
         await asyncio.gather(*(one(x) for x in targets))
 
 
@@ -185,6 +200,7 @@ async def collect_query(query):
                     old.price = n["price"]
                     event = "PRICE_CHANGED"
                 old.title = n["title"]
+                old.url = n["url"]
                 old.model = n.get("model") or old.model
                 old.condition = n.get("condition") or old.condition
                 old.storage_gb = n.get("storage_gb")
