@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, or_, func, text, and_
 
 from app.db import Session, Listing, Alert, PriceHistory, init_db
-from app.api_models import AlertCreate, ProfitRequest
+from app.api_models import AlertCreate, ProfitRequest, HuntRequest
 from app.scoring import calculate_deal_score
 from app.events import EventBus
 from app.config import settings
@@ -117,6 +117,29 @@ async def stats():
     async with Session() as s:
         count = (await s.execute(select(func.count(Listing.id)))).scalar_one()
         return {"listings": count}
+
+
+@app.post("/api/hunt")
+async def hunt(payload: HuntRequest):
+    async with Session() as s:
+        stmt = select(Listing).where(Listing.price > 0, Listing.price <= payload.budget).order_by(Listing.last_seen_at.desc()).limit(500)
+        if payload.query.strip():
+            needle = f"%{payload.query.strip()}%"
+            stmt = stmt.where(or_(Listing.title.ilike(needle), Listing.description_raw.ilike(needle), Listing.model.ilike(needle)))
+        rows = list((await s.execute(stmt)).scalars().all())
+        candidates = []
+        for x in rows:
+            prices = await _comparable_prices(s, x)
+            d = calculate_deal_score(x.price, prices, x.description_raw, comparable_count=len(prices))
+            if d.score and d.risk <= payload.max_risk and d.liquidity >= payload.min_liquidity and (d.estimated_profit or 0) >= payload.min_profit:
+                candidates.append({
+                    **listing_json(x, d),
+                    "hunt_margin": d.estimated_profit,
+                    "model": x.model,
+                    "condition": x.condition,
+                })
+        candidates.sort(key=lambda item: (item["estimated_profit"] or 0, item["deal_score"]), reverse=True)
+        return candidates[:payload.limit]
 
 
 @app.get("/api/listings")
