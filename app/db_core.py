@@ -81,6 +81,15 @@ class NotificationEvent(Base):
     )
 
 
+class UserSubscription(Base):
+    __tablename__ = "user_subscriptions"
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    plan: Mapped[str] = mapped_column(String(32), default="free")
+    active_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    telegram_charge_id: Mapped[str] = mapped_column(String(255), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
