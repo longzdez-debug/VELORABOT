@@ -1,31 +1,34 @@
 # VELORA
 
-VELORA is a market-intelligence platform for resellers: the Telegram Bot is the radar, while the Telegram Mini App is the terminal.
+VELORA is a market-intelligence platform for resellers: Telegram Bot = radar, Telegram Mini App = terminal.
 
-## Stack
+## Architecture
 
-- **TypeScript** — Mini App UI and frontend contracts.
-- **Python** — FastAPI, Telegram bot, market/deal intelligence and AI-facing services.
+- **TypeScript** — Mini App and frontend contracts.
+- **Python** — API, Telegram bot, market/deal intelligence and AI-facing services.
 - **Rust** — high-throughput collector/event-processing foundation.
-- **PostgreSQL** — source-of-truth listings and alerts.
-- **Redis** — realtime queues/cache.
-- **C++** and **C#/.NET** are reserved for measured native or Windows-specific components instead of adding complexity without a concrete need.
+- **PostgreSQL** — listings, price history and alerts.
+- **Redis** — realtime queue/cache layer.
+- **C++** — reserved for measured native hotspots.
+- **C#/.NET** — reserved for an optional Windows/desktop agent.
 
-## Current pipeline
+## Acquisition: API is not a requirement
 
-SOURCE -> COLLECTOR -> NORMALIZE -> DEDUP -> MARKET -> DEAL SCORE -> ALERT -> TELEGRAM / MINI APP
+VELORA is source-agnostic. A source can be integrated through an official API/feed when available, or through permitted public pages.
 
-The collector accepts a configurable public source URL and extracts structured Product/Offer JSON-LD. Source adapters remain modular so additional permitted sources can be added independently.
+The current web collector polls one or many configured public pages, fetches normal HTML, extracts JSON-LD Product/Offer data when present, falls back to ordinary HTML listing cards, normalizes title/price/URL/image/location, preserves the complete original description in `description_raw`, deduplicates by URL fingerprint, records price changes, evaluates Deal Score, and evaluates saved alerts for Telegram notifications.
 
-## Listing data
+It is not tied to KUFAR. KUFAR is one possible source, while additional marketplaces/catalogs/search pages can be added through adapters. We do not depend on private APIs, authentication bypass, CAPTCHA bypass or stolen sessions.
 
-The complete original listing description is stored in **description_raw** and is searchable. Derived AI/semantic signals are separate and never replace source text.
+## Core flow
+
+SOURCE PAGE/API -> COLLECTOR -> NORMALIZE -> DEDUP -> PRICE HISTORY -> MARKET/DEAL -> ALERT -> TELEGRAM / MINI APP
 
 ## API
 
 - GET /health
 - GET /api/stats
-- GET /api/listings?q=...
+- GET /api/listings?q=...&min_score=...&max_price=...
 - GET /api/listings/{id}
 - GET /api/alerts?user_id=...
 - POST /api/alerts?user_id=...
@@ -34,14 +37,14 @@ The complete original listing description is stored in **description_raw** and i
 
 ## Run
 
-Copy `.env.example` to `.env`. For Docker, the default example points at the compose PostgreSQL/Redis services. A Telegram bot token and public Mini App URL are only required when Telegram integration is enabled.
+Copy `.env.example` to `.env`, configure one or more permitted public pages in `COLLECTOR_URL` / `COLLECTOR_URLS`, and provide `TELEGRAM_BOT_TOKEN` only if Telegram delivery is wanted.
 
-```bash
-docker compose up --build
-```
+For Docker:
 
-The web terminal is served on port 8000.
+    docker compose up --build
 
-## Safety / data acquisition
+The Mini App/API is served on port 8000.
 
-VELORA is designed around permitted public sources and official integrations where available. It does not require authentication bypass, CAPTCHA bypass, stolen cookies or access to private infrastructure.
+## Important product invariant
+
+The original listing description is source data. AI-derived fields are additional signals and never replace it. Search and deal analysis can use the full description.
