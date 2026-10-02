@@ -4,6 +4,7 @@ from sqlalchemy import select, or_, func
 from app.db import Session, Listing, Alert, PriceHistory, init_db
 from app.api_models import AlertCreate, ProfitRequest
 from app.scoring import calculate_deal_score
+from app.alert_index import AlertIndex
 
 app = FastAPI(title="VELORA API", version="0.3.0")
 
@@ -73,7 +74,12 @@ async def create_alert(user_id: int, payload: AlertCreate):
         s.add(x)
         await s.commit()
         await s.refresh(x)
-        return {"id": x.id, "active": x.active}
+    index = AlertIndex()
+    try:
+        await index.add(x)
+    finally:
+        await index.close()
+    return {"id": x.id, "active": x.active}
 
 @app.get("/api/alerts")
 async def get_alerts(user_id: int):
@@ -92,7 +98,12 @@ async def delete_alert(alert_id: int, user_id: int):
             return {"error": "not_found"}
         await s.delete(x)
         await s.commit()
-        return {"ok": True}
+    index = AlertIndex()
+    try:
+        await index.remove(x)
+    finally:
+        await index.close()
+    return {"ok": True}
 
 @app.post("/api/profit")
 async def profit(payload: ProfitRequest):
