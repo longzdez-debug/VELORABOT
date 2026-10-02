@@ -19,6 +19,9 @@ class Listing(Base):
     __tablename__ = "listings"
     __table_args__ = (
         UniqueConstraint("source", "source_id", name="uq_listing_source_id"),
+        Index("ix_listings_source_last_seen", "source", "last_seen_at"),
+        Index("ix_listings_model_condition", "model", "condition"),
+        Index("ix_listings_price", "price"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -44,6 +47,9 @@ class Listing(Base):
 
 class PriceHistory(Base):
     __tablename__ = "price_history"
+    __table_args__ = (
+        Index("ix_price_history_listing_observed", "listing_id", "observed_at"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id", ondelete="CASCADE"), index=True)
     price: Mapped[float] = mapped_column(Float)
