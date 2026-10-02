@@ -15,6 +15,13 @@ _COLUMNS = {
     "memory_gb": "DOUBLE PRECISION",
 }
 
+_INDEXES = {
+    "ix_listings_source_last_seen": "CREATE INDEX IF NOT EXISTS ix_listings_source_last_seen ON listings (source, last_seen_at)",
+    "ix_listings_model_condition": "CREATE INDEX IF NOT EXISTS ix_listings_model_condition ON listings (model, condition)",
+    "ix_listings_price": "CREATE INDEX IF NOT EXISTS ix_listings_price ON listings (price)",
+    "ix_price_history_listing_observed": "CREATE INDEX IF NOT EXISTS ix_price_history_listing_observed ON price_history (listing_id, observed_at)",
+}
+
 
 async def ensure_listing_columns() -> None:
     async with engine.begin() as conn:
@@ -32,3 +39,6 @@ async def ensure_listing_columns() -> None:
         for name, ddl in _COLUMNS.items():
             if name not in existing:
                 await conn.execute(text(f"ALTER TABLE listings ADD COLUMN {name} {ddl}"))
+
+        for ddl in _INDEXES.values():
+            await conn.execute(text(ddl))
