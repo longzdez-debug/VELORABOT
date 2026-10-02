@@ -13,6 +13,7 @@ type Listing = {
   deal_score:number; market_price:number|null; deviation_pct:number|null;
   estimated_profit:number|null; risk:number; liquidity:number; reasons:string[];
   first_seen_at:string; last_seen_at:string;
+  model?:string; condition?:string; storage_gb?:number|null; memory_gb?:number|null;
 };
 
 const esc=(s:string)=>String(s??"").replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]!));
@@ -36,6 +37,7 @@ function listingCard(x:Listing){
   return `<article class="card" data-id="${x.id}">
     <div class="muted">${esc(x.location||"Регион не указан")} · ${esc(x.seller||"Продавец не указан")}</div>
     <div class="score">DEAL ${x.deal_score}/100</div>
+    <div class="muted">${esc(x.model||"Модель не определена")} · ${esc(x.condition||"unknown")}${x.storage_gb?` · ${x.storage_gb}GB`:""}</div>
     <h2>${esc(x.title)}</h2>
     <div class="price">${x.price.toLocaleString("ru-RU")} ${esc(x.currency)}</div>
     <div class="market">Market ${x.market_price==null?"—":x.market_price.toLocaleString("ru-RU")+" "+x.currency}
