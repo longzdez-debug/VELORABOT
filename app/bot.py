@@ -4,6 +4,7 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, W
 from sqlalchemy import select
 from app.config import settings
 from app.db import Session, Alert
+from app.alert_index import AlertIndex
 
 router = Router()
 
@@ -71,6 +72,11 @@ async def watch(message: Message):
         s.add(alert)
         await s.commit()
         await s.refresh(alert)
+    index = AlertIndex()
+    try:
+        await index.add(alert)
+    finally:
+        await index.close()
 
     await message.answer(
         f"Радар #{alert.id} включён\n"
@@ -114,6 +120,11 @@ async def stop(message: Message):
             return
         alert.active = False
         await s.commit()
+    index = AlertIndex()
+    try:
+        await index.remove(alert)
+    finally:
+        await index.close()
     await message.answer(f"Радар #{alert_id} отключён.")
 
 
