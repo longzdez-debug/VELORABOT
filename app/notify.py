@@ -7,6 +7,7 @@ from sqlalchemy import select, or_
 from app.db import Session, Listing, Alert, NotificationEvent
 from app.scoring import calculate_deal_score
 from app.config import settings
+from app.alert_index import AlertIndex
 
 
 def _match(alert: Alert, listing: Listing, score: int) -> bool:
@@ -38,9 +39,22 @@ async def evaluate_and_notify(listing_id: int, event_type: str = "NEW") -> int:
         )).scalars().all())
         deal = calculate_deal_score(listing.price, prices, listing.description_raw)
 
-        alerts = list((await s.execute(
-            select(Alert).where(Alert.active.is_(True))
-        )).scalars().all())
+        index = AlertIndex()
+        try:
+            candidate_ids = await index.candidates_for_text(
+                f"{listing.title} {listing.description_raw}"
+            )
+        finally:
+            await index.close()
+
+        alerts = []
+        if candidate_ids:
+            alerts = list((await s.execute(
+                select(Alert).where(
+                    Alert.active.is_(True),
+                    Alert.id.in_(candidate_ids),
+                )
+            )).scalars().all())
 
         targets = []
         fingerprint = hashlib.sha256(
