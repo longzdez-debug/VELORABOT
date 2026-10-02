@@ -10,6 +10,7 @@ from app.config import settings
 from app.db import Session, Listing
 from app.events import EventBus, ListingEvent
 from app.notify import evaluate_and_notify
+from app.alert_index import AlertIndex
 
 log = logging.getLogger(__name__)
 
@@ -52,6 +53,14 @@ async def _process(bus: EventBus, message_id: str, fields: dict[str, str]) -> No
 
 async def notification_worker() -> None:
     consumer = _consumer_name()
+    index = AlertIndex()
+    try:
+        count = await index.rebuild()
+        log.info("alert index rebuilt active_alerts=%s", count)
+    except Exception:
+        log.exception("alert index rebuild failed; notifications will retry")
+    finally:
+        await index.close()
     while True:
         bus = EventBus(settings.redis_url)
         try:
