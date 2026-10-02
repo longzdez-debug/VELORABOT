@@ -13,7 +13,7 @@ from app.events import EventBus
 from app.config import settings
 from app.alert_index import AlertIndex
 from app.telegram_auth import validate_init_data, TelegramAuthError
-from app.market import market_snapshot
+from app.market import market_snapshot\nfrom app.migrations import ensure_listing_columns
 
 app = FastAPI(title="VELORA API", version="0.3.0")
 
