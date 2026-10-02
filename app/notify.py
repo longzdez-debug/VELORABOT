@@ -31,9 +31,11 @@ async def evaluate_and_notify(listing_id:int,event_type="NEW"):
     bot=Bot(settings.telegram_bot_token)
     try:
         tag={"NEW":"🆕","PRICE_CHANGED":"📉","UPDATED":"♻️"}.get(event_type,"🔔")
+        market=f"{d.market_price:g} {x.currency}" if d.market_price is not None else "—"
+        deviation=f"{d.deviation_pct:.1f}%" if d.deviation_pct is not None else "—"
         text=(f"{tag} VELORA {event_type}\n\n{x.title}\n"
-              f"Цена: {x.price:g} {x.currency}\nMarket: {d.market_price:g} {x.currency}\n" if d.market_price is not None else f"Цена: {x.price:g} {x.currency}\nMarket: —\n"
-              f"Deal Score: {d.score}/100\nОтклонение: {d.deviation_pct:.1f}%\n"
+              f"Цена: {x.price:g} {x.currency}\nMarket: {market}\n"
+              f"Deal Score: {d.score}/100\nОтклонение: {deviation}\n"
               f"Риск: {d.risk}/100 · Ликвидность: {d.liquidity}/100\n\n"
               f"{x.description_raw[:1500] or 'Описание не указано'}\n\n{x.url}")
         for user_id in targets: await bot.send_message(user_id,text)
