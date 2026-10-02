@@ -51,6 +51,8 @@ async def duplicate_candidates(listing_id: int, limit: int = 20) -> list[dict]:
         candidate_key = normalize_text(row.title)
         overlap = len(set(source_key.split()) & set(candidate_key.split()))
         score = min(100, overlap * 18 + (25 if row.model and row.model == listing.model else 0))
+        if listing.duplicate_key and row.duplicate_key and listing.duplicate_key == row.duplicate_key:
+            score += 45
         if row.seller and listing.seller and normalize_text(row.seller) == normalize_text(listing.seller):
             score += 20
         if row.image_url and listing.image_url and row.image_url == listing.image_url:
