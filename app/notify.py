@@ -32,7 +32,7 @@ async def evaluate_and_notify(listing_id:int,event_type="NEW"):
     try:
         tag={"NEW":"🆕","PRICE_CHANGED":"📉","UPDATED":"♻️"}.get(event_type,"🔔")
         text=(f"{tag} VELORA {event_type}\n\n{x.title}\n"
-              f"Цена: {x.price:g} {x.currency}\nMarket: {d.market_price:g} {x.currency}\n"
+              f"Цена: {x.price:g} {x.currency}\nMarket: {d.market_price:g} {x.currency}\n" if d.market_price is not None else f"Цена: {x.price:g} {x.currency}\nMarket: —\n"
               f"Deal Score: {d.score}/100\nОтклонение: {d.deviation_pct:.1f}%\n"
               f"Риск: {d.risk}/100 · Ликвидность: {d.liquidity}/100\n\n"
               f"{x.description_raw[:1500] or 'Описание не указано'}\n\n{x.url}")
