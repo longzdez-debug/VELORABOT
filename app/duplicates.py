@@ -12,6 +12,11 @@ def normalize_text(value: str) -> str:
     return " ".join(re.findall(r"[\w]+", value))
 
 
+def duplicate_key_for(title: str, model: str = "", storage_gb: float | None = None, image_url: str = "") -> str:
+    raw = "|".join((normalize_text(title), normalize_text(model), str(storage_gb or ""), image_url.strip().casefold()))
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
 def fingerprint_for(title: str, description: str, seller: str, image_url: str = "") -> str:
     title_tokens = sorted(set(normalize_text(title).split()))
     body = normalize_text(description)[:1000]
