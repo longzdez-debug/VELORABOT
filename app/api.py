@@ -14,6 +14,7 @@ from app.config import settings
 from app.alert_index import AlertIndex
 from app.telegram_auth import validate_init_data, TelegramAuthError
 from app.market import market_snapshot, market_timeseries
+from app.duplicates import duplicate_candidates
 from app.migrations import ensure_listing_columns
 
 app = FastAPI(title="VELORA API", version="0.3.0")
@@ -157,6 +158,11 @@ async def listings(
             x for x in result
             if x["deal_score"] >= min_score and (max_price is None or x["price"] <= max_price)
         ]
+
+
+@app.get("/api/listings/{listing_id}/duplicates")
+async def listing_duplicates(listing_id: int):
+    return {"listing_id": listing_id, "duplicates": await duplicate_candidates(listing_id)}
 
 
 @app.get("/api/listings/{listing_id}")
