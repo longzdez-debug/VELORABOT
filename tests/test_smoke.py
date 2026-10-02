@@ -75,3 +75,4 @@ def test_telegram_webapp_init_data_signature(monkeypatch):
     digest = hmac.new(secret, check.encode(), hashlib.sha256).hexdigest()
     init_data = "&".join(f"{k}={quote(v)}" for k, v in pairs.items()) + "&hash=" + digest
     assert validate_init_data(init_data) == 42
+\n\nfrom app.market import _percentile\n\ndef test_market_percentiles_are_robust():\n    values = [100, 200, 300, 400, 500]\n    assert _percentile(values, 0.10) == 140\n    assert _percentile(values, 0.50) == 300\n    assert _percentile(values, 0.90) == 460\n\ndef test_market_percentile_empty():\n    assert _percentile([], 0.5) is None\n
