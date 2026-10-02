@@ -136,3 +136,10 @@ def test_duplicate_key_ignores_price():
         "iphone 15 pro",
         256,
     )
+
+
+def test_liquidity_sale_window_estimates_are_bounded():
+    from app.scoring import calculate_deal_score
+
+    d = calculate_deal_score(100, [150, 160, 170], "полный комплект", comparable_count=20)
+    assert 0 < d.sale_lt_24h_pct <= d.sale_lt_3d_pct <= d.sale_lt_7d_pct <= 99
