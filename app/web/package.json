@@ -1,0 +1,1 @@
+{"name":"velora-web","private":true,"version":"0.1.0","type":"module","scripts":{"build":"tsc"},"devDependencies":{"typescript":"^5.8.0"}}
