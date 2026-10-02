@@ -127,15 +127,39 @@ async function loadAlerts(){
   }catch(e){list.textContent="Для ALERTS откройте Mini App из Telegram.";}
 }
 
+
+
+async function runHunt(){
+  const budget=Number((document.getElementById("huntBudget") as HTMLInputElement).value);
+  if(!budget){ return; }
+  const payload={
+    query:q.value.trim(),
+    budget,
+    min_profit:Number((document.getElementById("huntProfit") as HTMLInputElement).value||0),
+    max_risk:Number((document.getElementById("huntRisk") as HTMLInputElement).value||60),
+    min_liquidity:Number((document.getElementById("huntLiquidity") as HTMLInputElement).value||0),
+    limit:50
+  };
+  const r=await fetch("/api/hunt",{method:"POST",headers:{"Content-Type":"application/json",...authHeaders},body:JSON.stringify(payload)});
+  if(!r.ok){return;}
+  const a=await r.json();
+  const target=document.getElementById("huntList")!;
+  target.innerHTML=a.length?a.map((x:Listing)=>listingCard(x)).join(""):"<article class='card'>Подходящих аномалий не найдено.</article>";
+  target.querySelectorAll<HTMLButtonElement>(".open-detail").forEach(b=>b.addEventListener("click",()=>showDetail(Number(b.dataset.id))));
+}
+
 function loadTab(tab:string){
   if(tab==="market") return loadMarket();
   if(tab==="alerts") return loadAlerts();
+  if(tab==="hunt"){ document.getElementById("hunt-panel")?.classList.remove("hidden"); return runHunt(); }
+  document.getElementById("hunt-panel")?.classList.add("hidden");
   return loadListings();
 }
 
 q.addEventListener("input",()=>{clearTimeout(window.veloraTimer);window.veloraTimer=window.setTimeout(()=>loadTab("radar"),220)});
 document.getElementById("apply")!.addEventListener("click",()=>loadTab("radar"));
 document.querySelectorAll<HTMLButtonElement>("[data-q]").forEach(b=>b.addEventListener("click",()=>{q.value=b.dataset.q||"";loadTab("radar")}));
+document.getElementById("huntRun")!.addEventListener("click",runHunt);
 document.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach(b=>b.addEventListener("click",()=>{
   document.querySelectorAll("[data-tab]").forEach(x=>x.classList.remove("active"));
   b.classList.add("active");
