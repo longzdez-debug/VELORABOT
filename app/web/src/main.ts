@@ -1,5 +1,12 @@
-type Listing={id:number;title:string;description:string;price:number;currency:string;location:string;seller:string;url:string;image_url:string};
+type Listing={id:number;title:string;description:string;price:number;currency:string;location:string;seller:string;url:string;deal_score:number;market_price:number|null;deviation_pct:number|null;estimated_profit:number|null;risk:number;liquidity:number};
 const esc=(s:string)=>s.replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]!));
-const q=document.querySelector<HTMLInputElement>("#q")!, list=document.querySelector<HTMLElement>("#list")!, count=document.querySelector<HTMLElement>("#count")!;
-async function load(){const r=await fetch("/api/listings?q="+encodeURIComponent(q.value));const a:Listing[]=await r.json();count.textContent=String(a.length);list.innerHTML=a.map(x=>"<article class='card'><div class='muted'>"+esc(x.location||"Регион не указан")+" · "+esc(x.seller||"Продавец не указан")+"</div><h2>"+esc(x.title)+"</h2><div class='price'>"+x.price.toLocaleString("ru-RU")+" "+esc(x.currency)+"</div><div class='desc'>"+esc(x.description||"Описание не указано")+"</div><a class='open' href='"+esc(x.url)+"' target='_blank' rel='noopener'>Открыть объявление →</a></article>").join("")}
-q.addEventListener("input",()=>{clearTimeout((window as any).veloraTimer);(window as any).veloraTimer=setTimeout(load,220)});load();
+const q=document.querySelector<HTMLInputElement>("#q")!,list=document.querySelector<HTMLElement>("#list")!,count=document.querySelector<HTMLElement>("#count")!,max=document.querySelector<HTMLInputElement>("#maxPrice")!,min=document.querySelector<HTMLInputElement>("#minScore")!;
+async function load(){
+ const p=new URLSearchParams({q:q.value});
+ if(max.value)p.set("max_price",max.value); if(min.value)p.set("min_score",min.value);
+ const r=await fetch("/api/listings?"+p);const a:Listing[]=await r.json();count.textContent=String(a.length);
+ list.innerHTML=a.map(x=>`<article class="card"><div class="muted">${esc(x.location||"Регион не указан")} · ${esc(x.seller||"Продавец не указан")}</div><div class="score">DEAL ${x.deal_score}/100</div><h2>${esc(x.title)}</h2><div class="price">${x.price.toLocaleString("ru-RU")} ${esc(x.currency)}</div><div class="market">Market ${x.market_price==null?"—":x.market_price.toLocaleString("ru-RU")+" "+x.currency} · Profit ${x.estimated_profit==null?"—":x.estimated_profit.toLocaleString("ru-RU")+" "+x.currency}</div><div class="desc">${esc(x.description||"Описание не указано")}</div><a class="open" href="${esc(x.url)}" target="_blank" rel="noopener">Открыть объявление →</a></article>`).join("")
+}
+q.addEventListener("input",()=>{clearTimeout((window as any).veloraTimer);(window as any).veloraTimer=setTimeout(load,220)});
+document.getElementById("apply")!.addEventListener("click",load);
+document.querySelectorAll<HTMLButtonElement>("[data-q]").forEach(b=>b.addEventListener("click",()=>{q.value=b.dataset.q||"";load()}));load();
