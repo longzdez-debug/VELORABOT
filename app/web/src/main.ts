@@ -1,0 +1,5 @@
+type Listing={id:number;title:string;description:string;price:number;currency:string;location:string;seller:string;url:string;image_url:string};
+const esc=(s:string)=>s.replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]!));
+const q=document.querySelector<HTMLInputElement>("#q")!, list=document.querySelector<HTMLElement>("#list")!, count=document.querySelector<HTMLElement>("#count")!;
+async function load(){const r=await fetch("/api/listings?q="+encodeURIComponent(q.value));const a:Listing[]=await r.json();count.textContent=String(a.length);list.innerHTML=a.map(x=>"<article class='card'><div class='muted'>"+esc(x.location||"Регион не указан")+" · "+esc(x.seller||"Продавец не указан")+"</div><h2>"+esc(x.title)+"</h2><div class='price'>"+x.price.toLocaleString("ru-RU")+" "+esc(x.currency)+"</div><div class='desc'>"+esc(x.description||"Описание не указано")+"</div><a class='open' href='"+esc(x.url)+"' target='_blank' rel='noopener'>Открыть объявление →</a></article>").join("")}
+q.addEventListener("input",()=>{clearTimeout((window as any).veloraTimer);(window as any).veloraTimer=setTimeout(load,220)});load();
