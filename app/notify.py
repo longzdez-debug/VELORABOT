@@ -2,9 +2,9 @@ import hashlib
 import time
 
 from aiogram import Bot
-from sqlalchemy import select, or_\nfrom datetime import datetime, timedelta
+from sqlalchemy import select\nfrom datetime import datetime, timedelta
 
-from app.db import Session, Listing, Alert, NotificationEvent
+from app.db import Session, Listing, Alert, NotificationEvent, PriceHistory
 from app.scoring import calculate_deal_score
 from app.config import settings
 from app.alert_index import AlertIndex
