@@ -38,6 +38,7 @@ async def evaluate_and_notify(listing_id: int, event_type: str = "NEW") -> int:
             prices,
             listing.description_raw,
             comparable_count=len(prices),
+            observed_days=max(0.0, (listing.last_seen_at - listing.first_seen_at).total_seconds() / 86400.0) if listing.first_seen_at and listing.last_seen_at else 0.0,
         )
 
         previous_price = None
@@ -112,7 +113,8 @@ async def evaluate_and_notify(listing_id: int, event_type: str = "NEW") -> int:
         f"Deal Score: {deal.score}/100\n"
         f"Отклонение: {deviation}\n"
         f"{drop_line}"
-        f"Риск: {deal.risk}/100 · Ликвидность: {deal.liquidity}/100\n\n"
+        f"Риск: {deal.risk}/100 · Ликвидность: {deal.liquidity}/100\n"
+        f"Оценка продажи: <24ч {deal.sale_lt_24h_pct:.1f}% · <3д {deal.sale_lt_3d_pct:.1f}% · <7д {deal.sale_lt_7d_pct:.1f}%\n\n" if deal.sale_lt_24h_pct is not None else f"Риск: {deal.risk}/100 · Ликвидность: {deal.liquidity}/100\n\n"
         f"{listing.description_raw[:1800] or 'Описание не указано'}\n\n"
         f"{listing.url}"
     )
