@@ -53,6 +53,20 @@ class AlertIndex:
             raw = await self.redis.sinter(*keys)
         return {int(x) for x in raw}
 
+    async def candidates_for_text(self, text: str) -> set[int]:
+        """Return alerts sharing at least one indexed token with listing text."""
+        keys = [TOKEN_PREFIX + term for term in sorted(terms(text))]
+        if not keys:
+            return set()
+        pipe = self.redis.pipeline()
+        for key in keys:
+            pipe.smembers(key)
+        rows = await pipe.execute()
+        result: set[int] = set()
+        for row in rows:
+            result.update(int(x) for x in row)
+        return result
+
     async def rebuild(self) -> int:
         await self.redis.delete(ACTIVE_KEY)
         async with Session() as session:
