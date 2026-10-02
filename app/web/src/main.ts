@@ -68,9 +68,11 @@ async function showDetail(id:number){
   try{
     const x=await json("/api/listings/"+id) as Listing & {price_history:{price:number;observed_at:string}[]};
     const history=x.price_history||[];
+    const duplicates=await json("/api/listings/"+id+"/duplicates").catch(()=>({duplicates:[]}));
     list.innerHTML=`<article class="card detail">
       <button id="back">← Назад</button>
       <div class="score">DEAL ${x.deal_score}/100 · RISK ${x.risk}/100 · LIQUIDITY ${x.liquidity}/100</div>
+      <div class="muted">${esc(x.model||"Модель не определена")} · ${esc(x.condition||"unknown")}${x.storage_gb?` · ${x.storage_gb}GB`:""}</div>
       <h1>${esc(x.title)}</h1>
       <div class="price">${x.price.toLocaleString("ru-RU")} ${esc(x.currency)}</div>
       <p class="muted">${esc(x.location)} · ${esc(x.seller)}</p>
@@ -82,6 +84,8 @@ async function showDetail(id:number){
       · Отклонение: ${x.deviation_pct==null?"—":x.deviation_pct.toFixed(1)+"%"}</p>
       <h3>ИСТОРИЯ ЦЕНЫ</h3>
       <div>${history.length?history.map(h=>`<div>${esc(new Date(h.observed_at).toLocaleString("ru-RU"))} — <b>${h.price.toLocaleString("ru-RU")} ${esc(x.currency)}</b></div>`).join(""):"История пока отсутствует"}</div>
+      <h3>ДУБЛИКАТЫ / ПОХОЖИЕ</h3>
+      <div>${(duplicates.duplicates||[]).slice(0,8).map((d:any)=>`<div class="duplicate-row"><span>${esc(d.title)}</span><b>${d.similarity}%</b><a class="open" href="${esc(d.url)}" target="_blank" rel="noopener">Источник</a></div>`).join("")||"Похожие объявления не найдены"}</div>
       <a class="open" href="${esc(x.url)}" target="_blank" rel="noopener">Открыть источник →</a>
     </article>`;
     document.getElementById("back")!.addEventListener("click",loadListings);
