@@ -14,6 +14,7 @@ type Listing = {
   estimated_profit:number|null; risk:number; liquidity:number; reasons:string[];
   first_seen_at:string; last_seen_at:string;
   model?:string; condition?:string; storage_gb?:number|null; memory_gb?:number|null;
+  sale_lt_24h_pct?:number|null; sale_lt_3d_pct?:number|null; sale_lt_7d_pct?:number|null;
 };
 
 const esc=(s:string)=>String(s??"").replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]!));
@@ -42,6 +43,7 @@ function listingCard(x:Listing){
     <div class="price">${x.price.toLocaleString("ru-RU")} ${esc(x.currency)}</div>
     <div class="market">Market ${x.market_price==null?"—":x.market_price.toLocaleString("ru-RU")+" "+x.currency}
       · Profit ${x.estimated_profit==null?"—":x.estimated_profit.toLocaleString("ru-RU")+" "+x.currency}</div>
+    <div class="muted">Продажа: ${x.sale_lt_24h_pct==null?"—":x.sale_lt_24h_pct+"% <24ч"} · ${x.sale_lt_3d_pct==null?"—":x.sale_lt_3d_pct+"% <3д"} · ${x.sale_lt_7d_pct==null?"—":x.sale_lt_7d_pct+"% <7д"}</div>
     <div class="desc">${esc(description.slice(0,420))}${description.length>420?"…":""}</div>
     <div class="reasons">${(x.reasons||[]).slice(0,3).map(esc).join(" · ")}</div>
     <button class="open-detail" data-id="${x.id}">Подробнее →</button>
@@ -80,7 +82,7 @@ async function showDetail(id:number){
       <pre class="description-full">${esc(x.description||"Описание не указано")}</pre>
       <h3>VELORA ANALYSIS</h3>
       <p>${(x.reasons||[]).map(esc).join("<br>")}</p>
-      <p>Рынок: ${x.market_price==null?"—":x.market_price.toLocaleString("ru-RU")+" "+x.currency}
+      <p>Продажа: ${x.sale_lt_24h_pct==null?"—":x.sale_lt_24h_pct+"% <24ч"} · ${x.sale_lt_3d_pct==null?"—":x.sale_lt_3d_pct+"% <3д"} · ${x.sale_lt_7d_pct==null?"—":x.sale_lt_7d_pct+"% <7д"}<br>Рынок: ${x.market_price==null?"—":x.market_price.toLocaleString("ru-RU")+" "+x.currency}
       · Отклонение: ${x.deviation_pct==null?"—":x.deviation_pct.toFixed(1)+"%"}</p>
       <h3>ИСТОРИЯ ЦЕНЫ</h3>
       <div>${history.length?history.map(h=>`<div>${esc(new Date(h.observed_at).toLocaleString("ru-RU"))} — <b>${h.price.toLocaleString("ru-RU")} ${esc(x.currency)}</b></div>`).join(""):"История пока отсутствует"}</div>
