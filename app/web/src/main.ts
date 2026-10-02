@@ -1,3 +1,8 @@
+declare global {
+  interface Window {
+    Telegram?: { WebApp?: { initData?: string; ready?:()=>void; expand?:()=>void } };
+  }
+}
 type Listing = {
   id:number; title:string; description:string; price:number; currency:string;
   location:string; seller:string; url:string; deal_score:number; market_price:number|null;
@@ -11,6 +16,8 @@ const count=document.querySelector<HTMLElement>("#count")!;
 const max=document.querySelector<HTMLInputElement>("#maxPrice")!;
 const min=document.querySelector<HTMLInputElement>("#minScore")!;
 const region=document.querySelector<HTMLInputElement>("#region")!;
+const initData=window.Telegram?.WebApp?.initData||"";
+const authHeaders=initData?{"X-Telegram-Init-Data":initData}:{};
 
 async function load(){
   const p=new URLSearchParams({q:q.value,limit:"100"});
@@ -39,6 +46,8 @@ q.addEventListener("input",()=>{clearTimeout((window as any).veloraTimer);(windo
 document.getElementById("apply")!.addEventListener("click",load);
 document.querySelectorAll<HTMLButtonElement>("[data-q]").forEach(b=>b.addEventListener("click",()=>{
   q.value=b.dataset.q||""; load();
+window.Telegram?.WebApp?.ready?.();
+window.Telegram?.WebApp?.expand?.();
 }));
 document.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach(b=>b.addEventListener("click",()=>{
   document.querySelectorAll("[data-tab]").forEach(x=>x.classList.remove("active"));
@@ -48,3 +57,4 @@ document.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach(b=>b.addEvent
   load();
 }));
 load();
+
