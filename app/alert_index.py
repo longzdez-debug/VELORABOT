@@ -8,7 +8,7 @@ from app.config import settings
 from app.db import Alert, Session
 from sqlalchemy import select
 
-TOKEN_RE = re.compile(r"[\\w-]{2,}", re.UNICODE)
+TOKEN_RE = re.compile(r"[\w-]{2,}", re.UNICODE)
 PREFIX = "velora:alerts:"
 ACTIVE_KEY = PREFIX + "active"
 TOKEN_PREFIX = PREFIX + "term:"
