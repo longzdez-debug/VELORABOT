@@ -206,9 +206,10 @@ async def seller_intelligence(seller: str):
         "first_seen": min((x.first_seen_at for x in rows), default=None),
         "last_seen": max((x.last_seen_at for x in rows), default=None),
         "median_price": median(prices) if prices else None,
+        "models": sorted({x.model for x in rows if x.model}),
         "categories": sorted(categories.items(), key=lambda item: item[1], reverse=True)[:10],
         "listings": [
-            {"id": x.id, "title": x.title, "price": x.price, "url": x.url, "last_seen_at": x.last_seen_at}
+            {"id": x.id, "title": x.title, "model": x.model, "condition": x.condition, "price": x.price, "url": x.url, "last_seen_at": x.last_seen_at}
             for x in rows[:50]
         ],
     }
