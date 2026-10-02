@@ -48,6 +48,12 @@ async def _comparable_prices(session, listing: Listing, limit: int = 500) -> lis
     return await comparable_prices(session, listing, limit=limit)
 
 
+def _observed_days(x) -> float:
+    if not x.first_seen_at or not x.last_seen_at:
+        return 0.0
+    return max(0.0, (x.last_seen_at - x.first_seen_at).total_seconds() / 86400.0)
+
+
 def listing_json(x, d):
     return {
         "id": x.id, "source": x.source, "title": x.title,
@@ -63,6 +69,7 @@ def listing_json(x, d):
         "deal_score": d.score, "market_price": d.market_price,
         "deviation_pct": d.deviation_pct, "estimated_profit": d.estimated_profit,
         "liquidity": d.liquidity, "risk": d.risk, "reasons": d.reasons,
+        "sale_lt_24h_pct": d.sale_lt_24h_pct, "sale_lt_3d_pct": d.sale_lt_3d_pct, "sale_lt_7d_pct": d.sale_lt_7d_pct,
     }
 
 
@@ -113,7 +120,7 @@ async def hunt(payload: HuntRequest):
         candidates = []
         for x in rows:
             prices = await _comparable_prices(s, x)
-            d = calculate_deal_score(x.price, prices, x.description_raw, comparable_count=len(prices))
+            d = calculate_deal_score(x.price, prices, x.description_raw, comparable_count=len(prices), observed_days=_observed_days(x))
             if d.score and d.risk <= payload.max_risk and d.liquidity >= payload.min_liquidity and (d.estimated_profit or 0) >= payload.min_profit:
                 candidates.append({
                     **listing_json(x, d),
