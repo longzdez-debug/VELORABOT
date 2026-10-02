@@ -8,6 +8,7 @@ from app.db import engine
 
 _COLUMNS = {
     "fingerprint": "VARCHAR(64) DEFAULT ''",
+    "duplicate_key": "VARCHAR(64) DEFAULT ''",
     "model": "VARCHAR(255) DEFAULT ''",
     "condition": "VARCHAR(32) DEFAULT 'unknown'",
     "storage_gb": "DOUBLE PRECISION",
