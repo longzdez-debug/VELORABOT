@@ -6,13 +6,10 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.db import Session, Listing, PriceHistory
-from app.events import new_listing_event\nfrom app.attributes import extract_attributes\nimport hashlib
+from app.events import new_listing_event
+from app.attributes import extract_attributes
+import hashlib
 from app.pipeline import publish_listing_event
-
-log = logging.getLogger(__name__)
-SEARCH_URL = "https://api.kufar.by/search-api/v2/search/rendered-paginated"
-
-
 def _price(value):
     if value is None:
         return None
@@ -55,6 +52,8 @@ def normalize_ad(raw):
         if isinstance(image, dict) and image.get("path"):
             images.append(f"https://rms.kufar.by/v1/gallery/{str(image['path']).lstrip('/')}")
 
+    attrs = extract_attributes(title, body)
+    fingerprint = hashlib.sha256((title.casefold()+"|"+body[:1000].casefold()+"|"+str(price)).encode()).hexdigest()
     return {
         "source_id": ad_id,
         "url": url,
@@ -65,6 +64,11 @@ def normalize_ad(raw):
         "image_url": images[0] if images else "",
         "location": ", ".join(x for x in (region, area) if x),
         "seller": str(raw.get("company_name") or raw.get("seller_name") or ""),
+        "model": attrs.model or "",
+        "condition": attrs.condition,
+        "storage_gb": attrs.storage_gb,
+        "memory_gb": attrs.memory_gb,
+        "fingerprint": fingerprint,
     }
 
 
@@ -121,6 +125,11 @@ async def collect_query(query):
                     old.price = n["price"]
                     event = "PRICE_CHANGED"
                 old.title = n["title"]
+                old.model = n.get("model") or old.model
+                old.condition = n.get("condition") or old.condition
+                old.storage_gb = n.get("storage_gb")
+                old.memory_gb = n.get("memory_gb")
+                old.fingerprint = n.get("fingerprint") or old.fingerprint
                 if n["description_raw"]:
                     old.description_raw = n["description_raw"]
                 old.location = n["location"]
@@ -140,6 +149,11 @@ async def collect_query(query):
                     location=n["location"],
                     seller=n["seller"],
                     image_url=n["image_url"],
+                    model=n.get("model") or "",
+                    condition=n.get("condition") or "unknown",
+                    storage_gb=n.get("storage_gb"),
+                    memory_gb=n.get("memory_gb"),
+                    fingerprint=n.get("fingerprint") or "",
                     first_seen_at=now,
                     last_seen_at=now,
                 )
