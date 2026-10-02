@@ -1,9 +1,11 @@
 from fastapi import FastAPI, Query
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select, or_, func
+from sqlalchemy import select, or_, func, text
 from app.db import Session, Listing, Alert, PriceHistory, init_db
 from app.api_models import AlertCreate, ProfitRequest
 from app.scoring import calculate_deal_score
+from app.events import EventBus
+from app.config import settings
 from app.alert_index import AlertIndex
 
 app = FastAPI(title="VELORA API", version="0.3.0")
@@ -25,6 +27,20 @@ def listing_json(x, d):
 @app.get("/health")
 async def health():
     return {"ok": True, "service": "velora", "version": "0.3.0"}
+
+@app.get("/ready")
+async def ready():
+    checks = {"database": False, "redis": False}
+    async with Session() as s:
+        await s.execute(text("SELECT 1"))
+        checks["database"] = True
+    bus = EventBus(settings.redis_url)
+    try:
+        checks["redis"] = bool(await bus.redis.ping())
+    finally:
+        await bus.close()
+    return {"ok": all(checks.values()), "checks": checks}
+
 
 @app.get("/api/stats")
 async def stats():
