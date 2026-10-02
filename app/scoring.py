@@ -13,6 +13,9 @@ class DealScore:
     liquidity: int
     risk: int
     reasons: list[str]
+    sale_lt_24h_pct: float | None = None
+    sale_lt_3d_pct: float | None = None
+    sale_lt_7d_pct: float | None = None
 
 
 _NEGATIVE = (
@@ -55,12 +58,24 @@ def _risk(description: str) -> tuple[int, list[str]]:
     return risk, reasons
 
 
+def liquidity_estimates(liquidity: int, observed_days: float = 0.0) -> tuple[float, float, float]:
+    # Evidence-based heuristic until VELORA has enough resolved sale outcomes.
+    # It is intentionally labeled as an estimate, never a guarantee.
+    age_factor = max(0.55, 1.0 - min(max(observed_days, 0.0), 30.0) / 60.0)
+    base = min(92.0, 18.0 + liquidity * 0.72) * age_factor
+    p24 = max(1.0, min(95.0, base * 0.45))
+    p3d = max(p24, min(97.0, base * 0.78))
+    p7d = max(p3d, min(99.0, base))
+    return round(p24, 1), round(p3d, 1), round(p7d, 1)
+
+
 def calculate_deal_score(
     price: float,
     comparable_prices: list[float],
     description: str = "",
     *,
     comparable_count: int | None = None,
+    observed_days: float = 0.0,
 ) -> DealScore:
     prices = sorted(p for p in comparable_prices if p > 0)
     if not prices or price <= 0:
@@ -87,4 +102,5 @@ def calculate_deal_score(
     evidence = min(15.0, count * 0.5)
     score = round(max(0.0, min(100.0, advantage + liquidity * 0.18 + (100 - risk) * 0.17 + evidence)))
     profit = max(0.0, market - price)
-    return DealScore(score, market, deviation, profit, liquidity, risk, reasons)
+    p24, p3d, p7d = liquidity_estimates(liquidity, observed_days)
+    return DealScore(score, market, deviation, profit, liquidity, risk, reasons, p24, p3d, p7d)
