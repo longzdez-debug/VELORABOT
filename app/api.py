@@ -2,7 +2,7 @@ from fastapi import FastAPI, Query, Header, HTTPException
 from datetime import datetime, timedelta
 from statistics import median
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select, or_, func, text
+from sqlalchemy import select, or_, func, text, and_
 from app.db import Session, Listing, Alert, PriceHistory, init_db
 from app.api_models import AlertCreate, ProfitRequest
 from app.scoring import calculate_deal_score
@@ -10,7 +10,7 @@ from app.events import EventBus
 from app.config import settings
 from app.alert_index import AlertIndex
 from app.telegram_auth import validate_init_data, TelegramAuthError
-from app.market import market_snapshot
+from app.market import market_snapshot\nimport re
 
 app = FastAPI(title="VELORA API", version="0.3.0")
 
@@ -29,7 +29,7 @@ def resolve_user_id(user_id: int | None, init_data: str | None) -> int:
         raise HTTPException(status_code=401, detail="Telegram authentication required")
     return user_id
 
-def listing_json(x, d):
+\n\ndef _tokens(text_value: str) -> list[str]:\n    return [x for x in re.findall(r"[\\w\\-]{3,}", text_value.casefold()) if not x.isdigit()]\n\n\ndef _comparable_filter(listing: Listing):\n    tokens = _tokens(listing.title)[:6]\n    if not tokens:\n        return None\n    clauses = [or_(Listing.title.ilike(f"%{t}%"), Listing.description_raw.ilike(f"%{t}%")) for t in tokens]\n    return and_(*clauses)\n\n\nasync def _comparable_prices(session, listing: Listing, limit: int = 500) -> list[float]:\n    filt = _comparable_filter(listing)\n    stmt = select(Listing.price).where(Listing.id != listing.id, Listing.price > 0)\n    if filt is not None:\n        stmt = stmt.where(filt)\n    return [float(x) for x in (await session.execute(stmt.limit(limit))).scalars().all() if x]\n\n\ndef listing_json(x, d):
     return {"id": x.id, "source": x.source, "title": x.title,
             "description": x.description_raw, "description_raw": x.description_raw,
             "price": x.price, "currency": x.currency, "location": x.location,
