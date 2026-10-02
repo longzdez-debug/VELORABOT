@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     event_stream: str = "velora:listings:events"
     event_dead_stream: str = "velora:listings:dead"
     event_maxlen: int = 100_000
+    event_max_retries: int = 5
+    event_retry_ttl_seconds: int = 86_400
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
