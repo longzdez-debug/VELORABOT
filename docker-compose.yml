@@ -22,7 +22,8 @@ services:
       POSTGRES_DB: velora
       POSTGRES_USER: velora
       POSTGRES_PASSWORD: velora
-    expose:\n      - "5432"
+    expose:
+      - "5432"
     restart: unless-stopped
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -35,7 +36,8 @@ services:
   redis:
     image: redis:7
     command: ["redis-server", "--appendonly", "yes"]
-    expose:\n      - "6379"
+    expose:
+      - "6379"
     restart: unless-stopped
     volumes:
       - redis_data:/data
@@ -44,7 +46,6 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
-
 
 volumes:
   postgres_data:
