@@ -51,3 +51,14 @@ Runtime checks:
 - PostgreSQL remains the source of truth for listings, alerts, price history and notification idempotency.
 
 The Telegram token is intentionally not committed to the repository.
+
+## Monetization
+
+VELORA Pro uses Telegram Stars for digital access. The `/pro` command opens a 30-day Pro invoice; successful payments are persisted in PostgreSQL and exposed through authenticated `/api/me`. The bot never stores card or payment credentials.
+
+## Operational guarantees
+
+- Original descriptions are retained verbatim as source data.
+- Event processing uses Redis Streams consumer groups, stale-message claiming, bounded retries and a dead-letter stream.
+- Notification delivery is idempotent through PostgreSQL notification fingerprints.
+- `/ready` verifies both PostgreSQL and Redis before the service is considered ready.
