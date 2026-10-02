@@ -8,6 +8,7 @@ from app.config import settings
 from app.db import Session, Listing, PriceHistory
 from app.events import new_listing_event
 from app.attributes import extract_attributes
+from app.duplicates import duplicate_key_for
 import hashlib
 from app.pipeline import publish_listing_event
 def _price(value):
@@ -69,6 +70,7 @@ def normalize_ad(raw):
         "storage_gb": attrs.storage_gb,
         "memory_gb": attrs.memory_gb,
         "fingerprint": fingerprint,
+        "duplicate_key": duplicate_key_for(title, attrs.model or "", attrs.storage_gb, images[0] if images else ""),
     }
 
 
@@ -130,6 +132,7 @@ async def collect_query(query):
                 old.storage_gb = n.get("storage_gb")
                 old.memory_gb = n.get("memory_gb")
                 old.fingerprint = n.get("fingerprint") or old.fingerprint
+                old.duplicate_key = n.get("duplicate_key") or old.duplicate_key
                 if n["description_raw"]:
                     old.description_raw = n["description_raw"]
                 old.location = n["location"]
@@ -154,6 +157,7 @@ async def collect_query(query):
                     storage_gb=n.get("storage_gb"),
                     memory_gb=n.get("memory_gb"),
                     fingerprint=n.get("fingerprint") or "",
+                    duplicate_key=n.get("duplicate_key") or "",
                     first_seen_at=now,
                     last_seen_at=now,
                 )
