@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.db import Session, Listing, PriceHistory
-from app.events import new_listing_event
+from app.events import new_listing_event\nfrom app.attributes import extract_attributes\nimport hashlib
 from app.pipeline import publish_listing_event
 
 log = logging.getLogger(__name__)
