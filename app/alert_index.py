@@ -11,6 +11,7 @@ from sqlalchemy import select
 TOKEN_RE = re.compile(r"[\w-]{1,}", re.UNICODE)
 PREFIX = "velora:alerts:"
 ACTIVE_KEY = PREFIX + "active"
+EMPTY_KEY = PREFIX + "empty"
 TOKEN_PREFIX = PREFIX + "term:"
 
 
@@ -33,6 +34,8 @@ class AlertIndex:
     async def add(self, alert: Alert) -> None:
         pipe = self.redis.pipeline()
         pipe.sadd(ACTIVE_KEY, alert.id)
+        if not terms(alert.query):
+            pipe.sadd(EMPTY_KEY, alert.id)
         for term in terms(alert.query):
             pipe.sadd(TOKEN_PREFIX + term, alert.id)
         await pipe.execute()
@@ -40,6 +43,7 @@ class AlertIndex:
     async def remove(self, alert: Alert) -> None:
         pipe = self.redis.pipeline()
         pipe.srem(ACTIVE_KEY, alert.id)
+        pipe.srem(EMPTY_KEY, alert.id)
         for term in terms(alert.query):
             pipe.srem(TOKEN_PREFIX + term, alert.id)
         await pipe.execute()
@@ -62,13 +66,13 @@ class AlertIndex:
         for key in keys:
             pipe.smembers(key)
         rows = await pipe.execute()
-        result: set[int] = set()
+        result: set[int] = {int(x) for x in await self.redis.smembers(EMPTY_KEY)}
         for row in rows:
             result.update(int(x) for x in row)
         return result
 
     async def rebuild(self) -> int:
-        await self.redis.delete(ACTIVE_KEY)
+        await self.redis.delete(ACTIVE_KEY, EMPTY_KEY)
         async with Session() as session:
             rows = (await session.execute(
                 select(Alert).where(Alert.active.is_(True))
@@ -78,6 +82,8 @@ class AlertIndex:
         pipe = self.redis.pipeline()
         for alert in rows:
             pipe.sadd(ACTIVE_KEY, alert.id)
+            if not terms(alert.query):
+                pipe.sadd(EMPTY_KEY, alert.id)
             for term in terms(alert.query):
                 pipe.sadd(TOKEN_PREFIX + term, alert.id)
         await pipe.execute()
