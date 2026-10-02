@@ -1,6 +1,6 @@
 from aiogram import Bot, Dispatcher, Router
 from aiogram.filters import CommandStart, Command
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo, LabeledPrice, PreCheckoutQuery, Message as TgMessage
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo, LabeledPrice, PreCheckoutQuery
 from datetime import datetime, timedelta
 from sqlalchemy import select
 from app.config import settings
