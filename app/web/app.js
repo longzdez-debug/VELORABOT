@@ -1,0 +1,4 @@
+const q=document.getElementById("q"),list=document.getElementById("list"),count=document.getElementById("count");
+async function load(){const r=await fetch("/api/listings?q="+encodeURIComponent(q.value));const a=await r.json();count.textContent=a.length;list.innerHTML=a.map(x=>`<article class="card"><div class="muted">${x.location||"—"} · ${x.seller||"seller unknown"}</div><h2>${esc(x.title)}</h2><div class="price">${x.price} ${x.currency}</div><div class="desc">${esc(x.description||"Описание отсутствует")}</div><a class="open" href="${x.url}" target="_blank">Открыть объявление →</a></article>`).join("")}
+function esc(s){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}
+q.addEventListener("input",()=>{clearTimeout(window.t);window.t=setTimeout(load,250)});load();
