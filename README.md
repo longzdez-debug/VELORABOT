@@ -28,3 +28,26 @@ The original listing description is source data. AI-derived fields are additiona
 ## Run
 
 Copy .env.example to .env, set TELEGRAM_BOT_TOKEN and KUFAR_QUERIES, then run docker compose up --build.
+
+
+## Production startup
+
+1. Copy `.env.example` to `.env`.
+2. Set `TELEGRAM_BOT_TOKEN`.
+3. Set `KUFAR_QUERIES` to comma-separated searches.
+4. Optionally set `TELEGRAM_WEBAPP_URL` to the public HTTPS URL of the Mini App.
+5. Start the stack:
+
+```bash
+docker compose up --build -d
+```
+
+Runtime checks:
+
+- `/health` = process health.
+- `/ready` = PostgreSQL + Redis readiness.
+- Redis Streams carries listing events and consumer-group recovery.
+- Redis alert index narrows notification candidates before PostgreSQL filtering.
+- PostgreSQL remains the source of truth for listings, alerts, price history and notification idempotency.
+
+The Telegram token is intentionally not committed to the repository.
