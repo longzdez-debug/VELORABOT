@@ -8,6 +8,8 @@ from typing import Any
 
 from redis.asyncio import Redis
 
+from app.config import settings
+
 
 @dataclass(frozen=True)
 class ListingEvent:
@@ -43,72 +45,40 @@ class ListingEvent:
         )
 
 
-def new_listing_event(
-    event_type: str,
-    listing_id: int,
-    source: str,
-    source_id: str,
-    price: float | None = None,
-) -> ListingEvent:
-    return ListingEvent(
-        event_id=uuid.uuid4().hex,
-        event_type=event_type,
-        listing_id=listing_id,
-        source=source,
-        source_id=source_id,
-        detected_at_ms=time.time_ns() // 1_000_000,
-        price=price,
-    )
+def new_listing_event(event_type: str, listing_id: int, source: str, source_id: str, price: float | None = None) -> ListingEvent:
+    return ListingEvent(uuid.uuid4().hex, event_type, listing_id, source, source_id, time.time_ns() // 1_000_000, price)
 
 
 class EventBus:
-    """Transport-neutral event bus.
-
-    Business logic depends only on publish/consume/ack/retry semantics, so Redis
-    Streams can later be replaced by Kafka without changing collectors or workers.
-    """
-
-    stream = "velora:listings:events"
-    dead_stream = "velora:listings:dead"
-    group = "velora-processors"
+    """Transport-neutral stream contract; Redis can later be swapped for Kafka."""
 
     def __init__(self, redis_url: str):
         self.redis: Redis = Redis.from_url(redis_url, decode_responses=True)
 
     async def ensure_group(self) -> None:
         try:
-            await self.redis.xgroup_create(self.stream, self.group, id="0", mkstream=True)
+            await self.redis.xgroup_create(settings.event_stream, settings.event_consumer_group, id="0", mkstream=True)
         except Exception as exc:
             if "BUSYGROUP" not in str(exc):
                 raise
 
     async def publish(self, event: ListingEvent) -> str:
-        fields = event.to_fields()
-        return str(await self.redis.xadd(self.stream, fields, maxlen=100_000, approximate=True))
+        return str(await self.redis.xadd(settings.event_stream, event.to_fields(), maxlen=settings.event_maxlen, approximate=True))
 
     async def consume(self, consumer: str, count: int = 20, block_ms: int = 1000):
         await self.ensure_group()
-        rows = await self.redis.xreadgroup(
-            self.group, consumer, {self.stream: ">"}, count=count, block=block_ms
-        )
-        return rows
+        return await self.redis.xreadgroup(settings.event_consumer_group, consumer, {settings.event_stream: ">"}, count=count, block=block_ms)
+
+    async def claim_stale(self, consumer: str, min_idle_ms: int = 30_000, count: int = 20):
+        await self.ensure_group()
+        result = await self.redis.xautoclaim(settings.event_stream, settings.event_consumer_group, consumer, min_idle_time=min_idle_ms, start_id="0-0", count=count)
+        return result[1] if result else []
 
     async def ack(self, message_id: str) -> None:
-        await self.redis.xack(self.stream, self.group, message_id)
+        await self.redis.xack(settings.event_stream, settings.event_consumer_group, message_id)
 
-    async def retry_or_dead_letter(self, message_id: str, event: ListingEvent, error: str) -> None:
-        # Keep retry metadata bounded in the stream payload. A worker can retry
-        # transient failures without losing the original event.
-        await self.redis.xadd(
-            self.dead_stream,
-            {
-                **event.to_fields(),
-                "failed_message_id": message_id,
-                "error": error[:1000],
-            },
-            maxlen=10_000,
-            approximate=True,
-        )
+    async def dead_letter(self, message_id: str, event: ListingEvent, error: str) -> str:
+        return str(await self.redis.xadd(settings.event_dead_stream, {**event.to_fields(), "failed_message_id": message_id, "error": error[:1000]}, maxlen=10_000, approximate=True))
 
     async def close(self) -> None:
         await self.redis.aclose()
