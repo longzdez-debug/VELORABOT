@@ -90,6 +90,7 @@ async function loadMarket(){
   try{
     const m=await json("/api/market?q="+encodeURIComponent(q.value)+"&days=30");
     count.textContent=String(m.count??0);
+    const ts=await json("/api/market/timeseries?q="+encodeURIComponent(q.value)+"&days=30");
     list.innerHTML=`<article class="card market-panel">
       <div class="score">MARKET · 30 DAYS</div>
       <h2>${esc(m.query||"Весь рынок")}</h2>
@@ -98,6 +99,8 @@ async function loadMarket(){
       <p>P50 ${m.p50==null?"—":m.p50.toLocaleString("ru-RU")} · P75 ${m.p75==null?"—":m.p75.toLocaleString("ru-RU")} · P90 ${m.p90==null?"—":m.p90.toLocaleString("ru-RU")}</p>
       <p>Supply: ${m.supply??0} · Trend: ${m.trend_pct==null?"—":m.trend_pct.toFixed(1)+"%"}</p>
       <p class="muted">Качество наблюдений: ${esc(m.observation_quality||"—")}</p>
+      <h3>ИСТОРИЯ</h3>
+      <div class="history">${ts.slice(-14).map((p:any)=>`<div>${esc(p.date)} — <b>${p.median==null?"—":p.median.toLocaleString("ru-RU")+" BYN"}</b> · ${p.count}</div>`).join("")||"Нет исторических наблюдений"}</div>
     </article>`;
   }catch(e){list.textContent="Ошибка Market Engine";}
 }
