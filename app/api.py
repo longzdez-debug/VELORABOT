@@ -44,22 +44,8 @@ def _tokens(value: str) -> list[str]:
     return [x for x in re.findall(r"[\w\-]{3,}", value.casefold()) if not x.isdigit()]
 
 
-def _comparable_filter(listing: Listing):
-    tokens = _tokens(listing.title)[:6]
-    if not tokens:
-        return None
-    return and_(*[
-        or_(Listing.title.ilike(f"%{token}%"), Listing.description_raw.ilike(f"%{token}%"))
-        for token in tokens
-    ])
-
-
 async def _comparable_prices(session, listing: Listing, limit: int = 500) -> list[float]:
-    filt = _comparable_filter(listing)
-    stmt = select(Listing.price).where(Listing.id != listing.id, Listing.price > 0)
-    if filt is not None:
-        stmt = stmt.where(filt)
-    return [float(x) for x in (await session.execute(stmt.limit(limit))).scalars().all() if x]
+    return await comparable_prices(session, listing, limit=limit)
 
 
 def listing_json(x, d):
