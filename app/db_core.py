@@ -32,6 +32,7 @@ class Listing(Base):
     location: Mapped[str] = mapped_column(String(255), default="")
     seller: Mapped[str] = mapped_column(String(255), default="")
     fingerprint: Mapped[str] = mapped_column(String(64), default="", index=True)
+    duplicate_key: Mapped[str] = mapped_column(String(64), default="", index=True)
     model: Mapped[str] = mapped_column(String(255), default="", index=True)
     condition: Mapped[str] = mapped_column(String(32), default="unknown", index=True)
     storage_gb: Mapped[float | None] = mapped_column(Float, nullable=True)
