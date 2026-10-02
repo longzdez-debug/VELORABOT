@@ -1,4 +1,6 @@
 from fastapi import FastAPI, Query, Header, HTTPException
+from datetime import datetime, timedelta
+from statistics import median
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, or_, func, text
 from app.db import Session, Listing, Alert, PriceHistory, init_db
@@ -8,6 +10,84 @@ from app.events import EventBus
 from app.config import settings
 from app.alert_index import AlertIndex
 from app.telegram_auth import validate_init_data, TelegramAuthError
+from app.market import market_snapshot
+
+app = FastAPI(title="VELORA API", version="0.3.0")
+
+@app.on_event("startup")
+async def startup():
+    await init_db()
+
+
+def resolve_user_id(user_id: int | None, init_data: str | None) -> int:
+    if init_data:
+        try:
+            return validate_init_data(init_data)
+        except TelegramAuthError as exc:
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="Telegram authentication required")
+    return user_id
+
+def listing_json(x, d):
+    return {"id": x.id, "source": x.source, "title": x.title,
+            "description": x.description_raw, "description_raw": x.description_raw,
+            "price": x.price, "currency": x.currency, "location": x.location,
+            "seller": x.seller, "url": x.url, "image_url": x.image_url,
+            "first_seen_at": x.first_seen_at, "last_seen_at": x.last_seen_at,
+            "deal_score": d.score, "market_price": d.market_price,
+            "deviation_pct": d.deviation_pct, "estimated_profit": d.estimated_profit,
+            "liquidity": d.liquidity, "risk": d.risk, "reasons": d.reasons}
+
+@app.get("/health")
+async def health():
+    return {"ok": True, "service": "velora", "version": "0.3.0"}
+
+@app.get("/ready")
+async def ready():
+    checks = {"database": False, "redis": False}
+    async with Session() as s:
+        await s.execute(text("SELECT 1"))
+        checks["database"] = True
+    bus = EventBus(settings.redis_url)
+    try:
+        checks["redis"] = bool(await bus.redis.ping())
+    finally:
+        await bus.close()
+    return {"ok": all(checks.values()), "checks": checks}
+
+
+@app.get("/api/market")
+async def market(q: str = Query("", max_length=200), days: int = Query(30, ge=1, le=90)):
+    return await market_snapshot(q=q, days=days)
+
+
+@app.get("/api/market/timeseries")
+async def market_timeseries(q: str = Query("", max_length=200), days: int = Query(30, ge=7, le=90)):
+    now = datetime.utcnow()
+    since = now - timedelta(days=days)
+    async with Session() as s:
+        stmt = select(PriceHistory).where(PriceHistory.observed_at >= since).order_by(PriceHistory.observed_at)
+        history = list((await s.execute(stmt)).scalars().all())
+    buckets: dict[str, list[float]] = {}
+    for h in history:
+        key = h.observed_at.strftime("%Y-%m-%d")
+        buckets.setdefault(key, []).append(float(h.price))
+    return [{"date": key, "median": median(values), "count": len(values)}
+            for key, values in sorted(buckets.items())]
+
+
+rom fastapi import FastAPI, Query, Header, HTTPException
+from fastapi.staticfiles import StaticFiles
+from sqlalchemy import select, or_, func, text
+from app.db import Session, Listing, Alert, PriceHistory, init_db
+from app.api_models import AlertCreate, ProfitRequest
+from app.scoring import calculate_deal_score
+from app.events import EventBus
+from app.config import settings
+from app.alert_index import AlertIndex
+from app.telegram_auth import validate_init_data, TelegramAuthError
+from app.market import market_snapshot
 
 app = FastAPI(title="VELORA API", version="0.3.0")
 
