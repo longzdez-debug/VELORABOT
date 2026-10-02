@@ -31,13 +31,19 @@ async def duplicate_candidates(listing_id: int, limit: int = 20) -> list[dict]:
         listing = await s.get(Listing, listing_id)
         if not listing:
             return []
+        if listing.duplicate_key:
+            exact = list((await s.execute(select(Listing).where(Listing.id != listing_id, Listing.duplicate_key == listing.duplicate_key).limit(limit))).scalars().all())
+        else:
+            exact = []
         tokens = sorted(set(normalize_text(listing.title).split()))[:8]
-        if not tokens:
+        if not tokens and not exact:
             return []
         conditions = [or_(Listing.title.ilike(f"%{token}%"), Listing.description_raw.ilike(f"%{token}%"))
                       for token in tokens if len(token) >= 3]
         stmt = select(Listing).where(Listing.id != listing_id, *conditions).limit(limit)
-        rows = list((await s.execute(stmt)).scalars().all())
+        rows = exact + list((await s.execute(stmt)).scalars().all())
+        seen_ids = set()
+        rows = [row for row in rows if not (row.id in seen_ids or seen_ids.add(row.id))]
 
     result = []
     source_key = normalize_text(listing.title)
