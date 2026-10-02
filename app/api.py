@@ -1,60 +1,103 @@
-from fastapi import FastAPI,Query
+from fastapi import FastAPI, Query
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select,or_,func
-from app.db import Session,Listing,Alert,PriceHistory,init_db
-from app.api_models import AlertCreate,ProfitRequest
+from sqlalchemy import select, or_, func
+from app.db import Session, Listing, Alert, PriceHistory, init_db
+from app.api_models import AlertCreate, ProfitRequest
 from app.scoring import calculate_deal_score
-app=FastAPI(title="VELORA API",version="0.3.0")
+
+app = FastAPI(title="VELORA API", version="0.3.0")
+
 @app.on_event("startup")
-async def startup(): await init_db()
-async def comparable_prices(s,exclude_id=None,limit=300):
-    stmt=select(Listing.price).order_by(Listing.first_seen_at.desc()).limit(limit)
-    if exclude_id: stmt=select(Listing.price).where(Listing.id!=exclude_id).order_by(Listing.first_seen_at.desc()).limit(limit)
-    return list((await s.execute(stmt)).scalars().all())
-def listing_json(x,d):
-    return {"id":x.id,"source":x.source,"title":x.title,"description":x.description_raw,"description_raw":x.description_raw,"price":x.price,
-    "currency":x.currency,"location":x.location,"seller":x.seller,"url":x.url,"image_url":x.image_url,"first_seen_at":x.first_seen_at,
-    "last_seen_at":x.last_seen_at,"deal_score":d.score,"market_price":d.market_price,"deviation_pct":d.deviation_pct,
-    "estimated_profit":d.estimated_profit,"liquidity":d.liquidity,"risk":d.risk,"reasons":d.reasons}
+async def startup():
+    await init_db()
+
+def listing_json(x, d):
+    return {"id": x.id, "source": x.source, "title": x.title,
+            "description": x.description_raw, "description_raw": x.description_raw,
+            "price": x.price, "currency": x.currency, "location": x.location,
+            "seller": x.seller, "url": x.url, "image_url": x.image_url,
+            "first_seen_at": x.first_seen_at, "last_seen_at": x.last_seen_at,
+            "deal_score": d.score, "market_price": d.market_price,
+            "deviation_pct": d.deviation_pct, "estimated_profit": d.estimated_profit,
+            "liquidity": d.liquidity, "risk": d.risk, "reasons": d.reasons}
+
 @app.get("/health")
-async def health(): return {"ok":True,"service":"velora","version":"0.3.0"}
+async def health():
+    return {"ok": True, "service": "velora", "version": "0.3.0"}
+
 @app.get("/api/stats")
 async def stats():
-    async with Session() as s: return {"listings":(await s.execute(select(func.count(Listing.id)))).scalar_one()}
+    async with Session() as s:
+        count = (await s.execute(select(func.count(Listing.id)))).scalar_one()
+        return {"listings": count}
+
 @app.get("/api/listings")
-async def listings(q:str=Query("",max_length=200),limit:int=Query(30,ge=1,le=100),min_score:int=Query(0,ge=0,le=100),max_price:float|None=None):
+async def listings(q: str = Query("", max_length=200),
+                   limit: int = Query(30, ge=1, le=100),
+                   min_score: int = Query(0, ge=0, le=100),
+                   max_price: float | None = None):
     async with Session() as s:
-        stmt=select(Listing).order_by(Listing.first_seen_at.desc()).limit(limit)
+        stmt = select(Listing).order_by(Listing.first_seen_at.desc()).limit(limit)
         if q.strip():
-            n=f"%{q.strip()}%"; stmt=select(Listing).where(or_(Listing.title.ilike(n),Listing.description_raw.ilike(n))).order_by(Listing.first_seen_at.desc()).limit(limit)
-        rows=list((await s.execute(stmt)).scalars().all()); prices=await comparable_prices(s)
-        out=[listing_json(x,calculate_deal_score(x.price,prices,x.description_raw)) for x in rows]
-        return [x for x in out if x["deal_score"]>=min_score and (max_price is None or x["price"]<=max_price)]
+            n = f"%{q.strip()}%"
+            stmt = select(Listing).where(
+                or_(Listing.title.ilike(n), Listing.description_raw.ilike(n))
+            ).order_by(Listing.first_seen_at.desc()).limit(limit)
+        rows = list((await s.execute(stmt)).scalars().all())
+        prices = list((await s.execute(select(Listing.price).limit(300))).scalars().all())
+        result = [listing_json(x, calculate_deal_score(x.price, prices, x.description_raw)) for x in rows]
+        return [x for x in result if x["deal_score"] >= min_score and
+                (max_price is None or x["price"] <= max_price)]
+
 @app.get("/api/listings/{listing_id}")
-async def listing(listing_id:int):
+async def listing(listing_id: int):
     async with Session() as s:
-        x=await s.get(Listing,listing_id)
-        if not x:return {"error":"not_found"}
-        d=calculate_deal_score(x.price,await comparable_prices(s,x.id),x.description_raw)
-        h=(await s.execute(select(PriceHistory).where(PriceHistory.listing_id==x.id).order_by(PriceHistory.observed_at))).scalars().all()
-        return {**listing_json(x,d),"price_history":[{"price":v.price,"observed_at":v.observed_at} for v in h]}
+        x = await s.get(Listing, listing_id)
+        if not x:
+            return {"error": "not_found"}
+        prices = list((await s.execute(
+            select(Listing.price).where(Listing.id != x.id).limit(300)
+        )).scalars().all())
+        d = calculate_deal_score(x.price, prices, x.description_raw)
+        history = (await s.execute(
+            select(PriceHistory).where(PriceHistory.listing_id == x.id)
+            .order_by(PriceHistory.observed_at)
+        )).scalars().all()
+        return {**listing_json(x, d),
+                "price_history": [{"price": h.price, "observed_at": h.observed_at} for h in history]}
+
 @app.post("/api/alerts")
-async def create_alert(user_id:int,payload:AlertCreate):
+async def create_alert(user_id: int, payload: AlertCreate):
     async with Session() as s:
-        x=Alert(telegram_user_id=user_id,**payload.model_dump()); s.add(x); await s.commit(); await s.refresh(x); return {"id":x.id,"active":x.active}
+        x = Alert(telegram_user_id=user_id, **payload.model_dump())
+        s.add(x)
+        await s.commit()
+        await s.refresh(x)
+        return {"id": x.id, "active": x.active}
+
 @app.get("/api/alerts")
-async def get_alerts(user_id:int):
+async def get_alerts(user_id: int):
     async with Session() as s:
-        a=(await s.execute(select(Alert).where(Alert.telegram_user_id==user_id).order_by(Alert.id.desc()))).scalars().all()
-        return [{"id":x.id,"query":x.query,"max_price":x.max_price,"min_score":x.min_score,"region":x.region,"active":x.active} for x in a]
+        rows = (await s.execute(
+            select(Alert).where(Alert.telegram_user_id == user_id).order_by(Alert.id.desc())
+        )).scalars().all()
+        return [{"id": x.id, "query": x.query, "max_price": x.max_price,
+                 "min_score": x.min_score, "region": x.region, "active": x.active} for x in rows]
+
 @app.delete("/api/alerts/{alert_id}")
-async def delete_alert(alert_id:int,user_id:int):
+async def delete_alert(alert_id: int, user_id: int):
     async with Session() as s:
-        x=await s.get(Alert,alert_id)
-        if not x or x.telegram_user_id!=user_id:return {"error":"not_found"}
-        await s.delete(x); await s.commit(); return {"ok":True}
+        x = await s.get(Alert, alert_id)
+        if not x or x.telegram_user_id != user_id:
+            return {"error": "not_found"}
+        await s.delete(x)
+        await s.commit()
+        return {"ok": True}
+
 @app.post("/api/profit")
-async def profit(payload:ProfitRequest):
-    cost=payload.buy_price+payload.delivery+payload.repairs+payload.selling_costs; p=payload.resale_price-cost
-    return {"total_cost":cost,"profit":p,"roi_pct":p/cost*100 if cost else 0}
-app.mount("/",StaticFiles(directory="app/web",html=True),name="web")
+async def profit(payload: ProfitRequest):
+    cost = payload.buy_price + payload.delivery + payload.repairs + payload.selling_costs
+    profit = payload.resale_price - cost
+    return {"total_cost": cost, "profit": profit, "roi_pct": profit / cost * 100 if cost else 0}
+
+app.mount("/", StaticFiles(directory="app/web", html=True), name="web")
