@@ -126,7 +126,8 @@ async function loadAlerts(){
       <p class="muted">Уведомления Telegram привязаны к вашему аккаунту.</p>
       ${a.length?a.map((x:any)=>`<div class="alert-row"><b>${esc(x.query||"Все объявления")}</b> · max ${x.max_price??"—"} · score ≥ ${x.min_score}<button class="stop-alert" data-id="${x.id}">Удалить</button></div>`).join(""):"Активных правил нет."}
     </article>`;
-    const add=document.createElement("button"); add.id="new-alert"; add.textContent="Создать правило"; add.className="primary"; list.querySelector(".card")?.prepend(add); add.addEventListener("click",createAlert);\n    document.querySelectorAll<HTMLButtonElement>(".stop-alert").forEach(b=>b.addEventListener("click",async()=>{await fetch("/api/alerts/"+b.dataset.id,{method:"DELETE",headers:authHeaders});loadAlerts();}));
+    const add=document.createElement("button"); add.id="new-alert"; add.textContent="Создать правило"; add.className="primary"; list.querySelector(".card")?.prepend(add); add.addEventListener("click",createAlert);
+    document.querySelectorAll<HTMLButtonElement>(".stop-alert").forEach(b=>b.addEventListener("click",async()=>{await fetch("/api/alerts/"+b.dataset.id,{method:"DELETE",headers:authHeaders});loadAlerts();}));
   }catch(e){list.textContent="Для ALERTS откройте Mini App из Telegram.";}
 }
 
@@ -152,10 +153,10 @@ async function runHunt(){
 }
 
 function loadTab(tab:string){
+  document.getElementById("hunt-panel")?.classList.add("hidden");
   if(tab==="market") return loadMarket();
   if(tab==="alerts") return loadAlerts();
   if(tab==="hunt"){ document.getElementById("hunt-panel")?.classList.remove("hidden"); return runHunt(); }
-  document.getElementById("hunt-panel")?.classList.add("hidden");
   return loadListings();
 }
 
