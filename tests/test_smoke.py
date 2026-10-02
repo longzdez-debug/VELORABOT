@@ -3,6 +3,8 @@ from app.scoring import calculate_deal_score
 from app.collector import parse_page
 from app.events import ListingEvent, new_listing_event
 from app.kufar import normalize_ad
+from app.alert_index import terms
+from app.telegram_auth import validate_init_data
 
 
 def test_settings():
@@ -48,3 +50,28 @@ def test_listing_event_roundtrip():
     restored = ListingEvent.from_fields(event.to_fields())
     assert restored == event
     assert restored.detected_at_ms > 0
+
+
+def test_alert_terms_preserve_unicode_tokens():
+    assert terms("iPhone 15 Pro") == {"iphone", "15", "pro"}
+
+
+def test_telegram_webapp_init_data_signature(monkeypatch):
+    import hashlib
+    import hmac
+    import json
+    import time
+    from urllib.parse import quote
+
+    token = "123456:test-token"
+    monkeypatch.setattr("app.config.settings.telegram_bot_token", token)
+    auth_date = int(time.time())
+    pairs = {
+        "auth_date": str(auth_date),
+        "user": json.dumps({"id": 42, "first_name": "Test"}, separators=(",", ":")),
+    }
+    check = "\n".join(f"{k}={pairs[k]}" for k in sorted(pairs))
+    secret = hmac.new(b"WebAppData", token.encode(), hashlib.sha256).digest()
+    digest = hmac.new(secret, check.encode(), hashlib.sha256).hexdigest()
+    init_data = "&".join(f"{k}={quote(v)}" for k, v in pairs.items()) + "&hash=" + digest
+    assert validate_init_data(init_data) == 42
