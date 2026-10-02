@@ -26,45 +26,54 @@ async def publish_listing_event(event: ListingEvent) -> None:
         await bus.close()
 
 
-async def notification_worker() -> None:
-    """Consume listing events without blocking collectors on Telegram.
+async def _process(bus: EventBus, message_id: str, fields: dict[str, str]) -> None:
+    event = ListingEvent.from_fields(fields)
+    started = time.time_ns() // 1_000_000
+    try:
+        async with Session() as session:
+            if not await session.get(Listing, event.listing_id):
+                await bus.ack(message_id)
+                return
+        await evaluate_and_notify(event.listing_id, event.event_type)
+        await bus.ack(message_id)
+        now = time.time_ns() // 1_000_000
+        log.info(
+            "event processed id=%s type=%s listing=%s processing_ms=%s total_ms=%s",
+            event.event_id,
+            event.event_type,
+            event.listing_id,
+            max(0, now - started),
+            max(0, now - event.detected_at_ms),
+        )
+    except Exception:
+        log.exception("event processing failed message=%s", message_id)
+        # Leave pending; a later worker can reclaim it.
 
-    Redis outages are treated as transient. The worker reconnects instead of
-    bringing down the API/collectors.
-    """
+
+async def notification_worker() -> None:
     consumer = _consumer_name()
     while True:
         bus = EventBus(settings.redis_url)
         try:
             await bus.ensure_group()
-            log.info("event worker online consumer=%s stream=%s", consumer, bus.stream)
+            log.info(
+                "event worker online consumer=%s stream=%s group=%s",
+                consumer,
+                settings.event_stream,
+                settings.event_consumer_group,
+            )
             while True:
-                rows = await bus.consume(consumer, count=settings.event_batch_size, block_ms=1000)
-                if not rows:
-                    continue
+                for message_id, fields in await bus.claim_stale(consumer):
+                    await _process(bus, message_id, fields)
+
+                rows = await bus.consume(
+                    consumer,
+                    count=settings.event_batch_size,
+                    block_ms=1000,
+                )
                 for _, messages in rows:
                     for message_id, fields in messages:
-                        event = ListingEvent.from_fields(fields)
-                        started = time.time_ns() // 1_000_000
-                        try:
-                            # Ensure the listing still exists before evaluating.
-                            async with Session() as session:
-                                if not await session.get(Listing, event.listing_id):
-                                    await bus.ack(message_id)
-                                    continue
-                            await evaluate_and_notify(event.listing_id, event.event_type)
-                            await bus.ack(message_id)
-                            log.info(
-                                "event processed id=%s type=%s listing=%s latency_ms=%s",
-                                event.event_id,
-                                event.event_type,
-                                event.listing_id,
-                                max(0, started - event.detected_at_ms),
-                            )
-                        except Exception:
-                            log.exception("event processing failed message=%s", message_id)
-                            # Do not ACK. Redis keeps the message pending so a
-                            # recovery worker can claim/retry it.
+                        await _process(bus, message_id, fields)
         except asyncio.CancelledError:
             await bus.close()
             raise
