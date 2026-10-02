@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import hmac
 import time
 from urllib.parse import parse_qsl
@@ -39,8 +40,8 @@ def validate_init_data(init_data: str, max_age_seconds: int = 86400) -> int:
 
     try:
         auth_date = int(pairs["auth_date"])
-        user_id = int(__import__("json").loads(pairs["user"])["id"])
-    except (KeyError, ValueError, TypeError, __import__("json").JSONDecodeError) as exc:
+        user_id = int(json.loads(pairs["user"])["id"])
+    except (KeyError, ValueError, TypeError, json.JSONDecodeError) as exc:
         raise TelegramAuthError("telegram user data is invalid") from exc
 
     if auth_date > int(time.time()) + 60:
