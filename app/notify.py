@@ -2,7 +2,7 @@ import hashlib
 import time
 
 from aiogram import Bot
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_\nfrom datetime import datetime, timedelta
 
 from app.db import Session, Listing, Alert, NotificationEvent
 from app.scoring import calculate_deal_score
@@ -94,7 +94,7 @@ async def evaluate_and_notify(listing_id: int, event_type: str = "NEW") -> int:
         f"Цена: {listing.price:g} {listing.currency}\n"
         f"Market: {market}\n"
         f"Deal Score: {deal.score}/100\n"
-        f"Отклонение: {deviation}\n"
+        f"Отклонение: {deviation}\n" + (f"Снижение цены: {price_drop_pct:.1f}%\n" if price_drop_pct is not None else "")
         f"Риск: {deal.risk}/100 · Ликвидность: {deal.liquidity}/100\n\n"
         f"{listing.description_raw[:1800] or 'Описание не указано'}\n\n"
         f"{listing.url}"
