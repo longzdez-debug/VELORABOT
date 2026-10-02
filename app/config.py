@@ -10,10 +10,16 @@ class Settings(BaseSettings):
     collector_url: str = ""
     collector_urls: str = ""
     collector_interval_seconds: float = 2.0
+    kufar_queries_raw: str = ""
+    kufar_interval_ms: int = 1000
+    kufar_size: int = 42
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     def source_urls(self) -> list[str]:
-        raw = ",".join(x for x in (self.collector_url, self.collector_urls) if x)
+        raw=",".join(x for x in (self.collector_url,self.collector_urls) if x)
         return [x.strip() for x in raw.split(",") if x.strip()]
 
-settings = Settings()
+    def kufar_query_list(self) -> list[str]:
+        return [x.strip() for x in self.kufar_queries_raw.split(",") if x.strip()]
+
+settings=Settings()
