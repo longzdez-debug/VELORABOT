@@ -2,6 +2,7 @@ import asyncio, html, logging, re
 from datetime import datetime
 
 import httpx
+from bs4 import BeautifulSoup
 from sqlalchemy import select
 
 from app.config import settings
@@ -74,6 +75,62 @@ def normalize_ad(raw):
     }
 
 
+async def _fetch_detail_description(client: httpx.AsyncClient, url: str) -> str:
+    try:
+        response = await client.get(url)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
+        meta = soup.find("meta", attrs={"property": "og:description"}) or soup.find("meta", attrs={"name": "description"})
+        if meta and meta.get("content"):
+            value = re.sub(r"\s+", " ", html.unescape(str(meta["content"]))).strip()
+            if len(value) >= 80:
+                return value
+        for node in soup.find_all("script"):
+            if node.get("type") == "application/ld+json":
+                try:
+                    obj = __import__("json").loads(node.string or node.get_text())
+                    objs = obj if isinstance(obj, list) else [obj]
+                    for item in objs:
+                        if isinstance(item, dict) and item.get("description"):
+                            value = re.sub(r"\s+", " ", html.unescape(str(item["description"]))).strip()
+                            if len(value) >= 80:
+                                return value
+                except Exception:
+                    pass
+        for selector in ["[data-testid*=description]", "[class*=description]", "article"]:
+            node = soup.select_one(selector)
+            if node:
+                value = re.sub(r"\s+", " ", node.get_text(" ", strip=True)).strip()
+                if 80 <= len(value) <= 10000:
+                    return value
+    except Exception:
+        log.debug("Kufar detail enrichment failed url=%s", url, exc_info=True)
+    return ""
+
+
+async def _enrich_short_descriptions(items: list[dict]) -> None:
+    targets = [x for x in items if len(x.get("description_raw", "")) < 80]
+    if not targets:
+        return
+    semaphore = asyncio.Semaphore(6)
+    async with httpx.AsyncClient(
+        timeout=10,
+        follow_redirects=True,
+        headers={"User-Agent": "Mozilla/5.0 (compatible; VELORA/1.0)", "Accept-Language": "ru-RU,ru;q=0.9"},
+    ) as client:
+        async def one(item: dict):
+            async with semaphore:
+                description = await _fetch_detail_description(client, item["url"])
+                if description:
+                    item["description_raw"] = description
+                    attrs = extract_attributes(item["title"], description)
+                    item["model"] = attrs.model or item.get("model", "")
+                    item["condition"] = attrs.condition
+                    item["storage_gb"] = attrs.storage_gb
+                    item["memory_gb"] = attrs.memory_gb
+        await asyncio.gather(*(one(x) for x in targets))
+
+
 async def _fetch_json(client, params):
     for attempt in range(3):
         try:
@@ -113,6 +170,7 @@ async def collect_query(query):
         data = await _fetch_json(client, params)
 
     items = [x for raw in data.get("ads") or [] if (x := normalize_ad(raw))]
+    await _enrich_short_descriptions(items)
     changed = []
     async with Session() as s:
         for n in items:
