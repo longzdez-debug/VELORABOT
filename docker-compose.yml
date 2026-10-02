@@ -22,7 +22,7 @@ services:
       POSTGRES_DB: velora
       POSTGRES_USER: velora
       POSTGRES_PASSWORD: velora
-    ports: ["5432:5432"]
+    expose:\n      - "5432"
     restart: unless-stopped
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -35,7 +35,7 @@ services:
   redis:
     image: redis:7
     command: ["redis-server", "--appendonly", "yes"]
-    ports: ["6379:6379"]
+    expose:\n      - "6379"
     restart: unless-stopped
     volumes:
       - redis_data:/data
