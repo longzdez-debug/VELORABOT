@@ -61,7 +61,7 @@ class AlertIndex:
         """Return alerts sharing at least one indexed token with listing text."""
         keys = [TOKEN_PREFIX + term for term in sorted(terms(text))]
         if not keys:
-            return set()
+            return {int(x) for x in await self.redis.smembers(EMPTY_KEY)}
         pipe = self.redis.pipeline()
         for key in keys:
             pipe.smembers(key)
