@@ -102,6 +102,18 @@ async function loadMarket(){
   }catch(e){list.textContent="Ошибка Market Engine";}
 }
 
+async function createAlert(){
+  if(!initData){ list.innerHTML="<article class=\"card\">Откройте Mini App внутри Telegram, чтобы создавать правила.</article>"; return; }
+  const query=prompt("Что искать? Можно оставить пустым для всех объявлений.") ?? "";
+  if(query===null) return;
+  const maxRaw=prompt("Максимальная цена BYN (необязательно):") ?? "";
+  const scoreRaw=prompt("Минимальный Deal Score 0-100:","70") ?? "70";
+  const payload={query,max_price:maxRaw?Number(maxRaw):null,min_score:Math.max(0,Math.min(100,Number(scoreRaw)||0)),region:region.value.trim()};
+  const r=await fetch("/api/alerts",{method:"POST",headers:{"Content-Type":"application/json",...authHeaders},body:JSON.stringify(payload)});
+  if(!r.ok){list.innerHTML="<article class=\"card\">Не удалось создать правило.</article>";return;}
+  await loadAlerts();
+}
+
 async function loadAlerts(){
   try{
     const a=await json("/api/alerts");
@@ -111,7 +123,7 @@ async function loadAlerts(){
       <p class="muted">Уведомления Telegram привязаны к вашему аккаунту.</p>
       ${a.length?a.map((x:any)=>`<div class="alert-row"><b>${esc(x.query||"Все объявления")}</b> · max ${x.max_price??"—"} · score ≥ ${x.min_score}<button class="stop-alert" data-id="${x.id}">Удалить</button></div>`).join(""):"Активных правил нет."}
     </article>`;
-    document.querySelectorAll<HTMLButtonElement>(".stop-alert").forEach(b=>b.addEventListener("click",async()=>{await fetch("/api/alerts/"+b.dataset.id,{method:"DELETE",headers:authHeaders});loadAlerts();}));
+    document.getElementById("new-alert")!.addEventListener("click",createAlert);\n    document.querySelectorAll<HTMLButtonElement>(".stop-alert").forEach(b=>b.addEventListener("click",async()=>{await fetch("/api/alerts/"+b.dataset.id,{method:"DELETE",headers:authHeaders});loadAlerts();}));
   }catch(e){list.textContent="Для ALERTS откройте Mini App из Telegram.";}
 }
 
