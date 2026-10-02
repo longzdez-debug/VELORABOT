@@ -19,12 +19,44 @@ def _consumer_name() -> str:
     return f"{socket.gethostname()}-{os.getpid()}"
 
 
+def _retry_key(message_id: str) -> str:
+    return f"velora:event:retry:{message_id}"
+
+
 async def publish_listing_event(event: ListingEvent) -> None:
     bus = EventBus(settings.redis_url)
     try:
         await bus.publish(event)
     finally:
         await bus.close()
+
+
+async def _clear_retry(bus: EventBus, message_id: str) -> None:
+    await bus.redis.delete(_retry_key(message_id))
+
+
+async def _record_failure(bus: EventBus, message_id: str, event: ListingEvent, exc: Exception) -> None:
+    key = _retry_key(message_id)
+    retries = int(await bus.redis.incr(key))
+    await bus.redis.expire(key, settings.event_retry_ttl_seconds)
+    if retries >= settings.event_max_retries:
+        await bus.dead_letter(message_id, event, f"retries={retries}: {exc}")
+        await bus.ack(message_id)
+        await bus.redis.delete(key)
+        log.error(
+            "event dead-lettered message=%s event=%s retries=%s",
+            message_id,
+            event.event_id,
+            retries,
+        )
+    else:
+        log.warning(
+            "event processing failed message=%s event=%s retry=%s/%s",
+            message_id,
+            event.event_id,
+            retries,
+            settings.event_max_retries,
+        )
 
 
 async def _process(bus: EventBus, message_id: str, fields: dict[str, str]) -> None:
@@ -34,9 +66,11 @@ async def _process(bus: EventBus, message_id: str, fields: dict[str, str]) -> No
         async with Session() as session:
             if not await session.get(Listing, event.listing_id):
                 await bus.ack(message_id)
+                await _clear_retry(bus, message_id)
                 return
         await evaluate_and_notify(event.listing_id, event.event_type)
         await bus.ack(message_id)
+        await _clear_retry(bus, message_id)
         now = time.time_ns() // 1_000_000
         log.info(
             "event processed id=%s type=%s listing=%s processing_ms=%s total_ms=%s",
@@ -46,9 +80,12 @@ async def _process(bus: EventBus, message_id: str, fields: dict[str, str]) -> No
             max(0, now - started),
             max(0, now - event.detected_at_ms),
         )
-    except Exception:
+    except Exception as exc:
         log.exception("event processing failed message=%s", message_id)
-        # Leave pending; a later worker can reclaim it.
+        try:
+            await _record_failure(bus, message_id, event, exc)
+        except Exception:
+            log.exception("failed to record event retry state message=%s", message_id)
 
 
 async def notification_worker() -> None:
