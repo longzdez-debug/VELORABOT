@@ -15,6 +15,7 @@ from app.alert_index import AlertIndex
 from app.telegram_auth import validate_init_data, TelegramAuthError
 from app.market import market_snapshot, market_timeseries
 from app.duplicates import duplicate_candidates
+from app.comparables import comparable_prices
 from app.migrations import ensure_listing_columns
 
 app = FastAPI(title="VELORA API", version="0.3.0")
