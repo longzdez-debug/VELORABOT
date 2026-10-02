@@ -50,13 +50,16 @@ async def _record_failure(bus: EventBus, message_id: str, event: ListingEvent, e
             retries,
         )
     else:
+        delay = min(60.0, float(2 ** min(retries - 1, 6)))
         log.warning(
-            "event processing failed message=%s event=%s retry=%s/%s",
+            "event processing failed message=%s event=%s retry=%s/%s backoff=%.1fs",
             message_id,
             event.event_id,
             retries,
             settings.event_max_retries,
+            delay,
         )
+        await asyncio.sleep(delay)
 
 
 async def _process(bus: EventBus, message_id: str, fields: dict[str, str]) -> None:
