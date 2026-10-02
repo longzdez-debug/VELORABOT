@@ -54,6 +54,35 @@ async def ready():
     return {"ok": all(checks.values()), "checks": checks}
 
 
+@app.get("/api/market")
+async def market(q: str = Query("", max_length=200)):
+    async with Session() as s:
+        stmt = select(Listing).order_by(Listing.last_seen_at.desc()).limit(2000)
+        if q.strip():
+            n = f"%{q.strip()}%"
+            stmt = select(Listing).where(
+                or_(Listing.title.ilike(n), Listing.description_raw.ilike(n))
+            ).order_by(Listing.last_seen_at.desc()).limit(2000)
+        rows = list((await s.execute(stmt)).scalars().all())
+    prices = sorted(float(x.price) for x in rows if x.price and x.price > 0)
+    if not prices:
+        return {"count": 0, "median": None, "p10": None, "p25": None, "p50": None, "p75": None, "p90": None}
+    def percentile(p: float) -> float:
+        pos = (len(prices) - 1) * p
+        lo, hi = int(pos), min(int(pos) + 1, len(prices) - 1)
+        frac = pos - lo
+        return prices[lo] + (prices[hi] - prices[lo]) * frac
+    return {
+        "count": len(prices),
+        "median": percentile(0.5),
+        "p10": percentile(0.1),
+        "p25": percentile(0.25),
+        "p50": percentile(0.5),
+        "p75": percentile(0.75),
+        "p90": percentile(0.9),
+    }
+
+
 @app.get("/api/stats")
 async def stats():
     async with Session() as s:
