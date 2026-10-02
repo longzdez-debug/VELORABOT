@@ -182,7 +182,22 @@ async def seller_intelligence(seller: str):
             .order_by(Listing.last_seen_at.desc())
             .limit(200)
         )).scalars().all())
+        listing_ids = [x.id for x in rows]
+        history = list((await s.execute(
+            select(PriceHistory)
+            .where(PriceHistory.listing_id.in_(listing_ids))
+            .order_by(PriceHistory.observed_at)
+        )).scalars().all()) if listing_ids else []
     prices = [float(x.price) for x in rows if x.price and x.price > 0]
+    changes = 0
+    drops = 0
+    rises = 0
+    for lid in listing_ids:
+        hp = [float(h.price) for h in history if h.listing_id == lid and h.price and h.price > 0]
+        if len(hp) >= 2:
+            changes += len(hp) - 1
+            drops += sum(1 for a,b in zip(hp,hp[1:]) if b < a)
+            rises += sum(1 for a,b in zip(hp,hp[1:]) if b > a)
     categories: dict[str, int] = {}
     for x in rows:
         key = (x.title.split()[0] if x.title else "unknown").casefold()
@@ -193,6 +208,10 @@ async def seller_intelligence(seller: str):
         "first_seen": min((x.first_seen_at for x in rows), default=None),
         "last_seen": max((x.last_seen_at for x in rows), default=None),
         "median_price": median(prices) if prices else None,
+        "price_changes": changes,
+        "price_drops": drops,
+        "price_increases": rises,
+        "price_drop_rate_pct": (drops / changes * 100) if changes else 0,
         "models": sorted({x.model for x in rows if x.model}),
         "categories": sorted(categories.items(), key=lambda item: item[1], reverse=True)[:10],
         "listings": [
