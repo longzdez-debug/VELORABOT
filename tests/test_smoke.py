@@ -75,15 +75,64 @@ def test_telegram_webapp_init_data_signature(monkeypatch):
     digest = hmac.new(secret, check.encode(), hashlib.sha256).hexdigest()
     init_data = "&".join(f"{k}={quote(v)}" for k, v in pairs.items()) + "&hash=" + digest
     assert validate_init_data(init_data) == 42
-\n\nfrom app.market import _percentile\n\ndef test_market_percentiles_are_robust():\n    values = [100, 200, 300, 400, 500]\n    assert _percentile(values, 0.10) == 140\n    assert _percentile(values, 0.50) == 300\n    assert _percentile(values, 0.90) == 460\n\ndef test_market_percentile_empty():\n    assert _percentile([], 0.5) is None\n\n\nfrom app.attributes import extract_attributes\n\ndef test_attribute_extraction_uses_title_and_description():\n    a = extract_attributes("iPhone 15 Pro 256GB", "Батарея 92%, полный комплект, без ремонтов")\n    assert a.model == "iphone 15 pro"\n    assert a.storage_gb == 256\n    assert a.condition == "unknown" or a.condition == "excellent"\n    assert a.repair_signal is False\n    assert a.completeness_signal == "complete"\n
+
+
+from app.market import _percentile
+
+
+def test_market_percentiles_are_robust():
+    values = [100, 200, 300, 400, 500]
+    assert _percentile(values, 0.10) == 140
+    assert _percentile(values, 0.50) == 300
+    assert _percentile(values, 0.90) == 460
+
+
+def test_market_percentile_empty():
+    assert _percentile([], 0.5) is None
+
+
+from app.attributes import extract_attributes
+
+
+def test_attribute_extraction_uses_title_and_description():
+    a = extract_attributes(
+        "iPhone 15 Pro 256GB",
+        "Батарея 92%, полный комплект, без ремонтов",
+    )
+    assert a.model == "iphone 15 pro"
+    assert a.storage_gb == 256
+    assert a.condition in {"unknown", "excellent"}
+    assert a.repair_signal is False
+    assert a.completeness_signal == "complete"
+
 
 def test_duplicate_key_is_stable_without_price():
     from app.duplicates import duplicate_key_for
-    a = duplicate_key_for("iPhone 15 Pro 256GB", "iphone 15 pro", 256, "https://img/item.jpg")
-    b = duplicate_key_for("iPhone 15 Pro 256GB", "iphone 15 pro", 256, "https://img/item.jpg")
+
+    a = duplicate_key_for(
+        "iPhone 15 Pro 256GB",
+        "iphone 15 pro",
+        256,
+        "https://img/item.jpg",
+    )
+    b = duplicate_key_for(
+        "iPhone 15 Pro 256GB",
+        "iphone 15 pro",
+        256,
+        "https://img/item.jpg",
+    )
     assert a == b
 
 
 def test_duplicate_key_ignores_price():
     from app.duplicates import duplicate_key_for
-    assert duplicate_key_for("iPhone 15 Pro", "iphone 15 pro", 256) == duplicate_key_for("iPhone 15 Pro", "iphone 15 pro", 256)
+
+    assert duplicate_key_for(
+        "iPhone 15 Pro",
+        "iphone 15 pro",
+        256,
+    ) == duplicate_key_for(
+        "iPhone 15 Pro",
+        "iphone 15 pro",
+        256,
+    )
