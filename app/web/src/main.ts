@@ -50,6 +50,12 @@ function listingCard(x:Listing){
   </article>`;
 }
 
+async function loadPlan(){
+  const el=document.getElementById("plan");
+  if(!el || !initData) return;
+  try{ const me=await json("/api/me"); el.textContent=me.plan==="pro"?"PRO":"FREE"; }catch(_){ el.textContent="FREE"; }
+}
+
 async function loadListings(){
   const p=new URLSearchParams({q:q.value,limit:"100"});
   if(max.value)p.set("max_price",max.value);
@@ -165,7 +171,8 @@ function loadTab(tab:string){
   if(tab==="market") return loadMarket();
   if(tab==="alerts") return loadAlerts();
   if(tab==="hunt"){ document.getElementById("hunt-panel")?.classList.remove("hidden"); return runHunt(); }
-  return loadListings();
+  return loadPlan();
+loadListings();
 }
 
 q.addEventListener("input",()=>{clearTimeout(window.veloraTimer);window.veloraTimer=window.setTimeout(()=>loadTab("radar"),220)});
