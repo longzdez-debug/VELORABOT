@@ -11,7 +11,7 @@ from app.comparables import comparable_prices
 
 
 def _match(alert: Alert, listing: Listing, score: int) -> bool:
-    text = f"{listing.title} {listing.description_raw}".casefold()
+    text = f"{listing.title} {listing.model} {listing.description_raw}".casefold()
     if alert.query:
         terms = [x for x in alert.query.casefold().split() if x]
         if not all(term in text for term in terms):
@@ -58,7 +58,7 @@ async def evaluate_and_notify(listing_id: int, event_type: str = "NEW") -> int:
         index = AlertIndex()
         try:
             candidate_ids = await index.candidates_for_text(
-                f"{listing.title} {listing.description_raw}"
+                f"{listing.title} {listing.model} {listing.description_raw}"
             )
         finally:
             await index.close()
@@ -114,7 +114,8 @@ async def evaluate_and_notify(listing_id: int, event_type: str = "NEW") -> int:
         f"Отклонение: {deviation}\n"
         f"{drop_line}"
         f"Риск: {deal.risk}/100 · Ликвидность: {deal.liquidity}/100\n"
-        f"Оценка продажи: <24ч {deal.sale_lt_24h_pct:.1f}% · <3д {deal.sale_lt_3d_pct:.1f}% · <7д {deal.sale_lt_7d_pct:.1f}%\n\n" if deal.sale_lt_24h_pct is not None else f"Риск: {deal.risk}/100 · Ликвидность: {deal.liquidity}/100\n\n"
+        f"Оценка продажи: <24ч {deal.sale_lt_24h_pct:.1f}% · <3д {deal.sale_lt_3d_pct:.1f}% · <7д {deal.sale_lt_7d_pct:.1f}%\n"
+        f"Модель: {listing.model or '—'} · Состояние: {listing.condition or 'unknown'}\n\n"
         f"{listing.description_raw[:1800] or 'Описание не указано'}\n\n"
         f"{listing.url}"
     )
