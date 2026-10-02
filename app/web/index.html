@@ -1,11 +1,31 @@
 <!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>VELORA — Market Radar</title><link rel="stylesheet" href="/style.css"></head>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>VELORA — Market Radar</title>
+<link rel="stylesheet" href="/style.css">
+</head>
 <body>
-<header><div><div class="brand">VELORA</div><div class="tag">MARKET INTELLIGENCE</div></div><div class="status">● LIVE</div></header>
+<header>
+  <div><div class="brand">VELORA</div><div class="tag">MARKET INTELLIGENCE</div></div>
+  <div class="status">● LIVE</div>
+</header>
 <main>
-<section class="hero"><div class="metric"><span>ОБЪЯВЛЕНИЯ</span><strong id="count">0</strong></div><div class="search"><span>ПОИСК ПО НАЗВАНИЮ И ПОЛНОМУ ОПИСАНИЮ</span><input id="q" autocomplete="off" placeholder="iPhone, MacBook, RTX..."></div></section>
-<section class="filters"><input id="maxPrice" type="number" min="0" placeholder="Макс. цена"><input id="minScore" type="number" min="0" max="100" value="0" placeholder="Min Deal Score"><button id="apply">Применить</button></section>
-<nav class="tabs"><button class="active">RADAR</button><button>DEALS</button><button>MARKET</button><button>ALERTS</button></nav>
-<div class="toolbar"><button data-q="">Все</button><button data-q="iPhone">iPhone</button><button data-q="MacBook">MacBook</button><button data-q="RTX">RTX</button></div>
-<div id="list" class="grid"></div>
-</main><script type="module" src="/generated/main.js"></script></body></html>
+  <section class="hero">
+    <div class="metric"><span>ОБЪЯВЛЕНИЯ</span><strong id="count">0</strong></div>
+    <div class="search"><span>ПОИСК ПО НАЗВАНИЮ И ПОЛНОМУ ОПИСАНИЮ</span><input id="q" autocomplete="off" placeholder="iPhone, MacBook, RTX..."></div>
+  </section>
+  <section class="filters">
+    <input id="maxPrice" type="number" min="0" placeholder="Макс. цена">
+    <input id="minScore" type="number" min="0" max="100" value="0" placeholder="Min Deal Score">
+    <input id="region" maxlength="100" placeholder="Регион">
+    <button id="apply">Применить</button>
+  </section>
+  <nav class="tabs"><button class="active" data-tab="radar">RADAR</button><button data-tab="deals">DEALS</button><button data-tab="market">MARKET</button><button data-tab="alerts">ALERTS</button></nav>
+  <div class="toolbar"><button data-q="">Все</button><button data-q="iPhone">iPhone</button><button data-q="MacBook">MacBook</button><button data-q="RTX">RTX</button></div>
+  <div id="list" class="grid"></div>
+</main>
+<script type="module" src="/generated/main.js"></script>
+</body>
+</html>
