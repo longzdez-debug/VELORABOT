@@ -4,3 +4,5 @@
 .hidden{display:none!important}
 #hunt-panel{margin-top:16px}
 .primary{margin-bottom:12px}
+
+.market-chart{display:flex;flex-direction:column;gap:7px}.chart-row{display:grid;grid-template-columns:55px 1fr 80px;gap:8px;align-items:center;font-size:11px}.chart-track{height:8px;background:#080a0d;border:1px solid #252a32;border-radius:999px;overflow:hidden}.chart-track i{display:block;height:100%;background:#b7ff5a}.duplicate-row{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid #252a32}.duplicate-row .open{margin:0}
