@@ -13,7 +13,7 @@ from app.events import EventBus
 from app.config import settings
 from app.alert_index import AlertIndex
 from app.telegram_auth import validate_init_data, TelegramAuthError
-from app.market import market_snapshot
+from app.market import market_snapshot, market_timeseries
 from app.migrations import ensure_listing_columns
 
 app = FastAPI(title="VELORA API", version="0.3.0")
@@ -98,20 +98,8 @@ async def market(q: str = Query("", max_length=200), days: int = Query(30, ge=1,
 
 
 @app.get("/api/market/timeseries")
-async def market_timeseries(q: str = Query("", max_length=200), days: int = Query(30, ge=7, le=90)):
-    now = datetime.utcnow()
-    since = now - timedelta(days=days)
-    async with Session() as s:
-        stmt = select(PriceHistory).where(PriceHistory.observed_at >= since).order_by(PriceHistory.observed_at)
-        history = list((await s.execute(stmt)).scalars().all())
-    buckets: dict[str, list[float]] = {}
-    for h in history:
-        key = h.observed_at.strftime("%Y-%m-%d")
-        buckets.setdefault(key, []).append(float(h.price))
-    return [
-        {"date": key, "median": median(values), "count": len(values)}
-        for key, values in sorted(buckets.items())
-    ]
+async def market_timeseries_api(q: str = Query("", max_length=200), days: int = Query(30, ge=7, le=90)):
+    return await market_timeseries(q=q, days=days)
 
 
 @app.get("/api/stats")
