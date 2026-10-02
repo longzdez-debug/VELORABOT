@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Header, HTTPException
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, or_, func, text
 from app.db import Session, Listing, Alert, PriceHistory, init_db
@@ -7,12 +7,24 @@ from app.scoring import calculate_deal_score
 from app.events import EventBus
 from app.config import settings
 from app.alert_index import AlertIndex
+from app.telegram_auth import validate_init_data, TelegramAuthError
 
 app = FastAPI(title="VELORA API", version="0.3.0")
 
 @app.on_event("startup")
 async def startup():
     await init_db()
+
+
+def resolve_user_id(user_id: int | None, init_data: str | None) -> int:
+    if init_data:
+        try:
+            return validate_init_data(init_data)
+        except TelegramAuthError as exc:
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="Telegram authentication required")
+    return user_id
 
 def listing_json(x, d):
     return {"id": x.id, "source": x.source, "title": x.title,
@@ -84,7 +96,8 @@ async def listing(listing_id: int):
                 "price_history": [{"price": h.price, "observed_at": h.observed_at} for h in history]}
 
 @app.post("/api/alerts")
-async def create_alert(user_id: int, payload: AlertCreate):
+async def create_alert(payload: AlertCreate, user_id: int | None = None, x_telegram_init_data: str | None = Header(default=None)):
+    user_id = resolve_user_id(user_id, x_telegram_init_data)
     async with Session() as s:
         x = Alert(telegram_user_id=user_id, **payload.model_dump())
         s.add(x)
@@ -98,7 +111,8 @@ async def create_alert(user_id: int, payload: AlertCreate):
     return {"id": x.id, "active": x.active}
 
 @app.get("/api/alerts")
-async def get_alerts(user_id: int):
+async def get_alerts(user_id: int | None = None, x_telegram_init_data: str | None = Header(default=None)):
+    user_id = resolve_user_id(user_id, x_telegram_init_data)
     async with Session() as s:
         rows = (await s.execute(
             select(Alert).where(Alert.telegram_user_id == user_id).order_by(Alert.id.desc())
@@ -107,7 +121,8 @@ async def get_alerts(user_id: int):
                  "min_score": x.min_score, "region": x.region, "active": x.active} for x in rows]
 
 @app.delete("/api/alerts/{alert_id}")
-async def delete_alert(alert_id: int, user_id: int):
+async def delete_alert(alert_id: int, user_id: int | None = None, x_telegram_init_data: str | None = Header(default=None)):
+    user_id = resolve_user_id(user_id, x_telegram_init_data)
     async with Session() as s:
         x = await s.get(Alert, alert_id)
         if not x or x.telegram_user_id != user_id:
