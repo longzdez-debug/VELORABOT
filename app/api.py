@@ -137,7 +137,7 @@ async def listings(
         if q.strip():
             n = f"%{q.strip()}%"
             stmt = select(Listing).where(
-                or_(Listing.title.ilike(n), Listing.description_raw.ilike(n))
+                or_(Listing.title.ilike(n), Listing.description_raw.ilike(n), Listing.model.ilike(n))
             ).order_by(Listing.first_seen_at.desc()).limit(limit)
         rows = list((await s.execute(stmt)).scalars().all())
         result = []
