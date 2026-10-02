@@ -6,7 +6,7 @@ from fastapi import FastAPI, Query, Header, HTTPException
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, or_, func, text, and_
 
-from app.db import Session, Listing, Alert, PriceHistory, init_db
+from app.db import Session, Listing, Alert, PriceHistory, UserSubscription, init_db
 from app.api_models import AlertCreate, ProfitRequest, HuntRequest
 from app.scoring import calculate_deal_score
 from app.events import EventBus
@@ -100,6 +100,16 @@ async def market(q: str = Query("", max_length=200), days: int = Query(30, ge=1,
 @app.get("/api/market/timeseries")
 async def market_timeseries_api(q: str = Query("", max_length=200), days: int = Query(30, ge=7, le=90)):
     return await market_timeseries(q=q, days=days)
+
+
+@app.get("/api/me")
+async def me(user_id: int | None = None, x_telegram_init_data: str | None = Header(default=None)):
+    user_id = resolve_user_id(user_id, x_telegram_init_data)
+    async with Session() as s:
+        sub = await s.get(UserSubscription, user_id)
+    now = datetime.utcnow()
+    active = bool(sub and sub.plan == "pro" and sub.active_until and sub.active_until > now)
+    return {"user_id": user_id, "plan": "pro" if active else "free", "active_until": sub.active_until if active else None}
 
 
 @app.get("/api/stats")
