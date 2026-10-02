@@ -11,6 +11,7 @@ from app.db import Session, Listing, PriceHistory
 from app.events import new_listing_event
 from app.pipeline import publish_listing_event
 from app.attributes import extract_attributes
+from app.duplicates import duplicate_key_for
 
 JSONLD = re.compile(
     r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
@@ -62,6 +63,7 @@ def _normalize(x, base):
         "storage_gb": attrs.storage_gb,
         "memory_gb": attrs.memory_gb,
         "fingerprint": hashlib.sha256((str(title).casefold()+"|"+description[:1000].casefold()+"|"+str(price)).encode()).hexdigest(),
+        "duplicate_key": duplicate_key_for(str(title), attrs.model or "", attrs.storage_gb, str(image)),
         "price": price,
         "currency": str(offer.get("priceCurrency") or "BYN"),
         "image_url": str(image),
@@ -95,6 +97,7 @@ def _html_fallback(html, base):
             "storage_gb": attrs.storage_gb,
             "memory_gb": attrs.memory_gb,
             "fingerprint": hashlib.sha256((title.casefold()+"|"+desc_text[:1000].casefold()+"|"+str(price)).encode()).hexdigest(),
+            "duplicate_key": duplicate_key_for(title, attrs.model or "", attrs.storage_gb, ""),
             "price": price,
             "currency": "BYN",
             "image_url": "",
@@ -144,6 +147,7 @@ async def collect_url(url):
                 old.storage_gb = n.get("storage_gb")
                 old.memory_gb = n.get("memory_gb")
                 old.fingerprint = n.get("fingerprint") or old.fingerprint
+                old.duplicate_key = n.get("duplicate_key") or old.duplicate_key
                 old.last_seen_at = datetime.utcnow()
                 changed.append((old.id, event, old.price, n["source_id"]))
             else:
