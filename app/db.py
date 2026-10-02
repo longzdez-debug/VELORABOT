@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime\nfrom sqlalchemy import Index
 from sqlalchemy import (
     String, Text, Float, BigInteger, DateTime, Boolean, ForeignKey, func, UniqueConstraint
 )
@@ -29,7 +29,7 @@ class Listing(Base):
     price: Mapped[float] = mapped_column(Float)
     currency: Mapped[str] = mapped_column(String(8), default="BYN")
     location: Mapped[str] = mapped_column(String(255), default="")
-    seller: Mapped[str] = mapped_column(String(255), default="")
+    seller: Mapped[str] = mapped_column(String(255), default="")\n    fingerprint: Mapped[str] = mapped_column(String(64), default="", index=True)\n    model: Mapped[str] = mapped_column(String(255), default="", index=True)\n    condition: Mapped[str] = mapped_column(String(32), default="unknown", index=True)\n    storage_gb: Mapped[float | None] = mapped_column(Float, nullable=True)\n    memory_gb: Mapped[float | None] = mapped_column(Float, nullable=True)
     image_url: Mapped[str] = mapped_column(Text, default="")
     first_seen_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     last_seen_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
